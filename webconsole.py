@@ -318,12 +318,14 @@ def start_minecraft():
     if not check_eula():
         return False, "EULA not accepted. Edit eula.txt and set eula=true."
     # Generate server.properties on first run
+    env = os.environ.copy()
+    env["TERM"] = "dumb"
     if not (SERVER_DIR / "server.properties").exists():
-        subprocess.run([str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-jar", str(jar), "--nogui"],
-                       cwd=str(SERVER_DIR), capture_output=True, timeout=20)
-    cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-jar", str(jar), "--nogui"]
+        subprocess.run([str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"],
+                       cwd=str(SERVER_DIR), capture_output=True, timeout=20, env=env)
+    cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
     proc = subprocess.Popen(cmd, cwd=str(SERVER_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            stdin=subprocess.PIPE, text=True, bufsize=1)
+                            stdin=subprocess.PIPE, text=True, bufsize=1, env=env)
     server_proc = proc
     threading.Thread(target=server_reader, args=(proc,), daemon=True).start()
     with _status_lock:
