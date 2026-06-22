@@ -15,15 +15,24 @@ Run a full Minecraft Java server on your Android phone via Termux, with a web da
 
 ## Install
 
-### Option A — One-liner
+### Option A — Git clone (most reliable)
+
+```bash
+pkg install git
+git clone https://github.com/Kaedo17/msm-webconsole-termux
+cd msm-webconsole-termux
+./install.sh
+```
+
+### Option B — One-liner (requires working curl)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main/install.sh | bash
 ```
 
-### Option B — Manual (files already on your device)
+### Option C — Manual (files already on your device)
 
-Copy `mcmanage.sh`, `webconsole.py`, and `install.sh` to Termux, then:
+Copy `mcmanage.sh`, `webconsole.py`, and `install.sh` to the same folder, then:
 
 ```bash
 chmod +x install.sh
@@ -33,8 +42,8 @@ chmod +x install.sh
 The installer will:
 1. Install openjdk-17, screen, curl, python
 2. Install Flask (for web UI)
-3. Copy scripts to `~/.local/bin/mcmanage` and `~/.local/bin/webconsole.py`
-4. Check that `~/.local/bin` is in PATH
+3. Copy scripts to `~/.local/bin/`
+4. Add `~/.local/bin` to PATH in `~/.bashrc`
 
 ## Usage
 
