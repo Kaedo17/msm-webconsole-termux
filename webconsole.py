@@ -709,7 +709,9 @@ loadDashboard();
 # ═══════════════════════════════════════════════════════════════════════
 
 from mc_server import start_polling  # noqa: E402
-import mc_routes  # noqa: E402, F401
+from mc_routes import register_routes  # noqa: E402
+
+register_routes(app, HTML)
 
 
 # ═══════════════════════════════════════════════════════════════════════
