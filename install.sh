@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # mcmanage installer
 # One-liner: curl -sL https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main/install.sh | bash
-# Or: pkg install git && git clone https://github.com/Kaedo17/msm-webconsole-termux && cd msm-webconsole-termux && ./install.sh
+# Or: git clone https://github.com/Kaedo17/msm-webconsole-termux && cd msm-webconsole-termux && ./install.sh
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO_URL="https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main"
@@ -14,8 +14,18 @@ if [ ! -d /data/data/com.termux ]; then
     exit 1
 fi
 
-# ── Clean up any previous broken symlinks ──
-rm -f "$INSTALL_DIR/mcmanage" "$INSTALL_DIR/webconsole.py"
+# ── Resolve this script's real directory (handles symlinks) ──
+SCRIPT_FILE="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+SCRIPT_DIR="$(dirname "$SCRIPT_FILE")"
+
+echo "   Installer dir: $SCRIPT_DIR"
+echo "   Target dir:    $INSTALL_DIR"
+
+# ── Clean old files (remove both files and broken symlinks) ──
+rm -f "$INSTALL_DIR/mcmanage" "$INSTALL_DIR/webconsole.py" 2>/dev/null
+# Also clean any directory with the same name (broken state from previous runs)
+[ -d "$INSTALL_DIR/mcmanage" ] && rm -rf "$INSTALL_DIR/mcmanage" 2>/dev/null
+[ -d "$INSTALL_DIR/webconsole.py" ] && rm -rf "$INSTALL_DIR/webconsole.py" 2>/dev/null
 
 echo "[1/5] Updating packages..."
 pkg update -y
@@ -29,18 +39,18 @@ pip install flask 2>/dev/null || python3 -m pip install flask 2>/dev/null
 echo "[4/5] Installing mcmanage.sh + webconsole.py..."
 mkdir -p "$INSTALL_DIR"
 
-# Detect source directory (works both locally and via curl pipe)
-SCRIPT_SRC=""
-if [ -f "$(dirname "$0")/mcmanage.sh" ] 2>/dev/null; then
-    SCRIPT_SRC="$(cd "$(dirname "$0")" && pwd)"
+# Try local files first (if install.sh is in the repo directory)
+LOCAL_OK=false
+if [ -f "$SCRIPT_DIR/mcmanage.sh" ] && [ -f "$SCRIPT_DIR/webconsole.py" ]; then
+    echo "   Found local files in: $SCRIPT_DIR"
+    echo "   Copying..."
+    cp -f "$SCRIPT_DIR/mcmanage.sh" "$INSTALL_DIR/mcmanage" && \
+    cp -f "$SCRIPT_DIR/webconsole.py" "$INSTALL_DIR/webconsole.py" && \
+    LOCAL_OK=true
 fi
 
-if [ -n "$SCRIPT_SRC" ] && [ -f "$SCRIPT_SRC/mcmanage.sh" ] && [ -f "$SCRIPT_SRC/webconsole.py" ]; then
-    echo "   (copying local files)"
-    cp "$SCRIPT_SRC/mcmanage.sh" "$INSTALL_DIR/mcmanage" || exit 1
-    cp "$SCRIPT_SRC/webconsole.py" "$INSTALL_DIR/webconsole.py" || exit 1
-else
-    echo "   (downloading from GitHub)"
+if ! $LOCAL_OK; then
+    echo "   Downloading from GitHub..."
     DOWNLOAD_OK=false
     for i in 1 2 3; do
         echo "   Attempt $i/3..."
@@ -74,7 +84,7 @@ if [ -f "$INSTALL_DIR/mcmanage" ]; then
     echo "[OK] Installed to $INSTALL_DIR/mcmanage"
     echo "[OK] Web UI at  $INSTALL_DIR/webconsole.py"
 else
-    echo "[!] Install failed."
+    echo "[!] Install failed — $INSTALL_DIR/mcmanage not found."
     exit 1
 fi
 
@@ -91,7 +101,8 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         echo "[OK] Added to ~/.bashrc"
     fi
     export PATH="$HOME/.local/bin:$PATH"
-    echo "[OK] Run 'source ~/.bashrc' or restart Termux for PATH to persist."
+    echo "[OK] Now 'mcmanage' works in this session."
+    echo "    Run 'source ~/.bashrc' or restart Termux to make permanent."
 fi
 
 echo
@@ -109,6 +120,6 @@ echo
 echo "Use existing server:"
 echo "  mcmanage --dir /path/to/your/server start"
 echo
-echo "Update later:"
+echo "Update:"
 echo "  cd msm-webconsole-termux && git pull && ./install.sh"
 echo
