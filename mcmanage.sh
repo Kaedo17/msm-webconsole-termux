@@ -590,7 +590,7 @@ usage() {
 \e[36mMinecraft Server Manager for Termux\e[0m
 
 \e[33mUsage:\e[0m
-  $0 \e[36m<command>\e[0m [options]
+  $0 [--dir /path/to/server] \e[36m<command>\e[0m [options]
 
 \e[33mCommands:\e[0m
   init               Full setup: install deps, download jar, accept EULA, start & console
@@ -619,15 +619,17 @@ usage() {
 
 \e[33mExamples:\e[0m
   \$0 start
+  \$0 --dir ~/minecraft-server start
   \$0 stop 15
   \$0 cmd "say Hello everyone!"
   \$0 cmd "whitelist add Steve"
   \$0 logs 100
   \$0 backup
 
-\e[33mConfiguration:\e[0m
-  Configure via environment variables or edit the script:
+\e[33mArguments:\e[0m
+  --dir <path>       Server directory   (default: script directory)
 
+\e[33mEnvironment:\e[0m
   SERVER_DIR         Server directory   (default: script directory)
   SERVER_JAR         Jar filename       (default: server.jar)
   MAX_RAM            Max heap size      (default: 2G)
@@ -642,6 +644,32 @@ usage() {
   \$0 console   (Ctrl+A then D to detach)
 EOF
 }
+
+# ── Parse --dir flag ──
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dir)
+            if [ -z "$2" ]; then err "--dir requires a path"; exit 1; fi
+            SERVER_DIR="$2"
+            shift 2
+            ;;
+        --dir=*)
+            SERVER_DIR="${1#*=}"
+            shift
+            ;;
+        *)
+            ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${ARGS[@]}"
+
+# Recompute path-dependent vars after SERVER_DIR is set
+PID_FILE="$SERVER_DIR/server.pid"
+LOG_FILE="$SERVER_DIR/server.log"
+BACKUP_DIR="$SERVER_DIR/backups"
 
 case "${1:-help}" in
     start)     start_server ;;

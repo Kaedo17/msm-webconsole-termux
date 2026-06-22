@@ -39,6 +39,9 @@ The installer will:
 ## Usage
 
 ```bash
+# Use an existing server folder
+mcmanage --dir /path/to/existing/server start
+
 # Full setup — install deps, download server jar, accept EULA, start, console
 mcmanage init
 
@@ -46,10 +49,10 @@ mcmanage init
 mcmanage web
 
 # Manual control
-mcmanage start
+mcmanage --dir ~/minecraft-server start
 mcmanage stop 15
 mcmanage restart
-mcmanage console        # Ctrl+A then D to detach
+mcmanage console          # Ctrl+A then D to detach
 mcmanage cmd "say hello"
 
 # Server info
@@ -62,8 +65,8 @@ mcmanage backup
 mcmanage backups
 
 # Files
-mcmanage props          # edit server.properties
-mcmanage optimize       # apply tweaks
+mcmanage props            # edit server.properties
+mcmanage optimize         # apply tweaks
 ```
 
 ## Web Dashboard
