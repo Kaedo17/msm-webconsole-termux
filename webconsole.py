@@ -7,6 +7,7 @@ Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,8 +31,6 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", 5000))
 JAVA_BIN = shutil.which("java") or "java"
 JAR_NAME = os.environ.get("SERVER_JAR", "server.jar")
-MAX_RAM = os.environ.get("MAX_RAM", "2G")
-MIN_RAM = os.environ.get("MIN_RAM", "512M")
 
 # ── Globals ───────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -40,6 +39,32 @@ console_history = []
 status_cache = {"online": False, "players": [], "tps": 0, "uptime": 0, "mem_mb": 0, "started_at": ""}
 _status_lock = threading.Lock()
 CONSOLE_MAX = 500
+CONFIG_FILE = None  # set after SERVER_DIR is finalized
+MIN_RAM = os.environ.get("MIN_RAM", "512M")
+MAX_RAM = os.environ.get("MAX_RAM", "2G")
+
+# ── Config persistence ───────────────────────────────────────────────
+
+def config_path():
+    return SERVER_DIR / ".webconsole.json"
+
+def load_config():
+    global MIN_RAM, MAX_RAM
+    cf = config_path()
+    if cf.exists():
+        try:
+            d = json.loads(cf.read_text())
+            MIN_RAM = d.get("min_ram", MIN_RAM)
+            MAX_RAM = d.get("max_ram", MAX_RAM)
+        except Exception:
+            pass
+
+def save_config():
+    cf = config_path()
+    try:
+        cf.write_text(json.dumps({"min_ram": MIN_RAM, "max_ram": MAX_RAM}, indent=2))
+    except Exception:
+        pass
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -220,7 +245,27 @@ def api_status():
         "started_at": status_cache["started_at"],
         "jar": str(find_jar() or ""),
         "server_dir": str(SERVER_DIR),
+        "min_ram": MIN_RAM,
+        "max_ram": MAX_RAM,
     })
+
+@app.route("/api/ram", methods=["GET", "POST"])
+def api_ram():
+    global MIN_RAM, MAX_RAM
+    if request.method == "GET":
+        return ok({"min_ram": MIN_RAM, "max_ram": MAX_RAM})
+    data = request.get_json(silent=True) or {}
+    new_min = data.get("min_ram", "").strip().upper()
+    new_max = data.get("max_ram", "").strip().upper()
+    valid = re.compile(r"^\d+[MG]$")
+    if not valid.match(new_min) or not valid.match(new_max):
+        return fail("Invalid RAM format. Use e.g. 512M, 1G, 2G, 4G")
+    if server_proc and server_proc.poll() is None:
+        return fail("Stop the server before changing RAM.")
+    MIN_RAM = new_min
+    MAX_RAM = new_max
+    save_config()
+    return ok({"message": f"RAM set to {MIN_RAM} min / {MAX_RAM} max", "min_ram": MIN_RAM, "max_ram": MAX_RAM})
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
@@ -617,7 +662,33 @@ async function loadDashboard() {
         <tr><td style="padding:6px 0;color:#888">Players</td><td style="padding:6px 0">${d.players.length ? d.players.join(', ') : 'None'}</td></tr>
       </table>
     </div>
+    <div style="margin-top:16px;padding:16px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px">
+      <h3 style="margin-bottom:8px;font-size:14px;color:#888;text-transform:uppercase">RAM Allocation</h3>
+      <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+        <div>
+          <label style="font-size:12px;color:#888">Min RAM</label>
+          <input type="text" id="ramMin" value="${d.min_ram}" style="width:90px;padding:8px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:14px;outline:none;margin-top:4px">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888">Max RAM</label>
+          <input type="text" id="ramMax" value="${d.max_ram}" style="width:90px;padding:8px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:14px;outline:none;margin-top:4px">
+        </div>
+        <button class="btn btn-save" style="padding:8px 18px" onclick="saveRam()" id="ramSaveBtn">Save RAM</button>
+      </div>
+      <div style="font-size:12px;color:#666;margin-top:8px">Examples: 512M, 1G, 2G, 4G — stop server before changing</div>
+    </div>
   `;
+}
+
+async function saveRam() {
+  const min = $('ramMin').value.trim().toUpperCase();
+  const max = $('ramMax').value.trim().toUpperCase();
+  const btn = $('ramSaveBtn');
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+  const d = await api('ram', {min_ram: min, max_ram: max});
+  btn.textContent = 'Save RAM';
+  btn.disabled = false;
 }
 
 // ── Console ──
@@ -791,6 +862,8 @@ def main():
     if not SERVER_DIR.exists():
         print(f"[!] Server directory does not exist: {SERVER_DIR}")
         sys.exit(1)
+
+    load_config()
 
     print(f" Minecraft Web Manager")
     print(f"  Server directory: {SERVER_DIR}")
