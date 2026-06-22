@@ -19,6 +19,7 @@ def server_reader(proc):
             if not line:
                 continue
             mc_state.console_history.append(line)
+            mc_state.console_queue.put(line)
             if len(mc_state.console_history) > mc_state.CONSOLE_MAX:
                 mc_state.console_history.pop(0)
             if "]:" in line and "joined the game" in line:
@@ -32,7 +33,9 @@ def server_reader(proc):
                     if name in mc_state.status_cache["players"]:
                         mc_state.status_cache["players"].remove(name)
     except Exception as e:
-        mc_state.console_history.append(f"[WebConsole] Reader error: {e}")
+        msg = f"[WebConsole] Reader error: {e}"
+        mc_state.console_history.append(msg)
+        mc_state.console_queue.put(msg)
 
 
 def poll_status():

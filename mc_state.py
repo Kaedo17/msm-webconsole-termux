@@ -8,6 +8,7 @@ so you always see the latest value.
 
 import json
 import os
+import queue
 import shutil
 import threading
 from pathlib import Path
@@ -23,6 +24,7 @@ JAR_NAME = os.environ.get("SERVER_JAR", "server.jar")
 # ── Global runtime state ─────────────────────────────────────────────
 server_proc = None
 console_history = []
+console_queue = queue.Queue()
 status_cache = {"online": False, "players": [], "tps": 0, "uptime": 0, "mem_mb": 0, "started_at": ""}
 _status_lock = threading.Lock()
 CONSOLE_MAX = 500

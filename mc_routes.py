@@ -1,6 +1,7 @@
 """All API route definitions for the Minecraft web console."""
 
 import json
+import queue
 import re
 import tarfile
 import time
@@ -101,22 +102,33 @@ def register_routes(app, html):
     #  CONSOLE (SSE)
     # ═══════════════════════════════════════════════════════════════════
 
+    _console_connections = 0
+
     @app.route("/api/console")
     def api_console():
         def stream():
-            last_len = 0
-            while True:
-                new_lines = mc_state.console_history[last_len:]
-                if new_lines:
-                    last_len = len(mc_state.console_history)
-                    yield f"data: {json.dumps({'lines': new_lines})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'lines': []})}\n\n"
-                time.sleep(0.5)
+            nonlocal _console_connections
+            _console_connections += 1
+            q = mc_state.console_queue
+            hist = mc_state.console_history
+            sent = len(hist)
+            # Send full history first
+            if sent > 0:
+                yield f"data: {json.dumps({'lines': hist[:]})}\n\n"
+            try:
+                while not request.is_disconnected():
+                    try:
+                        line = q.get(timeout=1)
+                        yield f"data: {json.dumps({'lines': [line]})}\n\n"
+                    except queue.Empty:
+                        yield f"data: {json.dumps({'lines': []})}\n\n"
+            finally:
+                _console_connections -= 1
 
         resp = Response(stream(), mimetype="text/event-stream")
         resp.headers["Cache-Control"] = "no-cache"
         resp.headers["X-Accel-Buffering"] = "no"
+        resp.headers["Connection"] = "keep-alive"
         return resp
 
     # ═══════════════════════════════════════════════════════════════════
