@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -271,24 +272,27 @@ def get_uptime(pid):
 
 def server_reader(proc):
     global console_history
-    for line in iter(proc.stdout.readline, ""):
-        line = line.rstrip("\n\r")
-        if not line:
-            continue
-        console_history.append(line)
-        if len(console_history) > CONSOLE_MAX:
-            console_history.pop(0)
-        # Parse player list from log
-        if "]:" in line and "joined the game" in line:
-            with _status_lock:
-                name = line.split("]:")[-1].strip().split(" ")[0].strip()
-                if name and name not in status_cache["players"]:
-                    status_cache["players"].append(name)
-        if "]:" in line and "left the game" in line:
-            with _status_lock:
-                name = line.split("]:")[-1].strip().split(" ")[0].strip()
-                if name in status_cache["players"]:
-                    status_cache["players"].remove(name)
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            line = line.rstrip("\n\r")
+            if not line:
+                continue
+            console_history.append(line)
+            if len(console_history) > CONSOLE_MAX:
+                console_history.pop(0)
+            # Parse player list from log
+            if "]:" in line and "joined the game" in line:
+                with _status_lock:
+                    name = line.split("]:")[-1].strip().split(" ")[0].strip()
+                    if name and name not in status_cache["players"]:
+                        status_cache["players"].append(name)
+            if "]:" in line and "left the game" in line:
+                with _status_lock:
+                    name = line.split("]:")[-1].strip().split(" ")[0].strip()
+                    if name in status_cache["players"]:
+                        status_cache["players"].remove(name)
+    except Exception as e:
+        console_history.append(f"[WebConsole] Reader error: {e}")
 
 def poll_status():
     global status_cache
@@ -323,7 +327,14 @@ def start_minecraft():
     if not (SERVER_DIR / "server.properties").exists():
         subprocess.run([str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"],
                        cwd=str(SERVER_DIR), capture_output=True, timeout=20, env=env)
-    cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
+    java_cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
+    # Use script to create a PTY (fixes stdout buffering and JLine issues on Termux)
+    script_bin = shutil.which("script")
+    if script_bin:
+        cmd_str = shlex.join(java_cmd) if hasattr(shlex, 'join') else " ".join(shlex.quote(x) for x in java_cmd)
+        cmd = [script_bin, "-q", "-c", cmd_str, "/dev/null"]
+    else:
+        cmd = java_cmd
     proc = subprocess.Popen(cmd, cwd=str(SERVER_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             stdin=subprocess.PIPE, text=True, bufsize=1, env=env)
     server_proc = proc
@@ -462,7 +473,10 @@ def api_console():
             else:
                 yield f"data: {json.dumps({'lines': []})}\n\n"
             time.sleep(0.5)
-    return Response(stream(), mimetype="text/event-stream")
+    resp = Response(stream(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 @app.route("/api/files")
 def api_files():
