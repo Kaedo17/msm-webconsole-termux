@@ -561,6 +561,38 @@ link_to_path() {
     fi
 }
 
+update_self() {
+    local script_dir="$SCRIPT_DIR"
+    info "Checking for updates..."
+
+    if [ -d "$script_dir/.git" ]; then
+        info "Updating via git pull..."
+        (cd "$script_dir" && git pull)
+        if [ $? -ne 0 ]; then
+            err "Git pull failed."
+            return 1
+        fi
+        info "Re-running install.sh..."
+        if [ -f "$script_dir/install.sh" ]; then
+            chmod +x "$script_dir/install.sh"
+            "$script_dir/install.sh"
+        else
+            err "install.sh not found."
+            return 1
+        fi
+    else
+        info "Downloading latest from GitHub..."
+        local target="$HOME/.local/bin/mcmanage"
+        local web_py="$HOME/.local/bin/webconsole.py"
+        local repo="https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main"
+        curl -sSfLo "$target" "$repo/mcmanage.sh" || { err "Download failed."; return 1; }
+        curl -sSfLo "$web_py" "$repo/webconsole.py" || { err "Download failed."; return 1; }
+        chmod +x "$target"
+        ok "Updated mcmanage.sh and webconsole.py"
+    fi
+    ok "Update complete!"
+}
+
 launch_web_ui() {
     local script_dir
     script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -607,6 +639,7 @@ usage() {
   props              Edit server.properties
   optimize           Apply optimization tweaks to server.properties
   install            Download and install a server jar
+  update             Update mcmanage.sh and webconsole.py to latest
   service            Create a termux-services entry
   web                Launch web management UI (Python Flask app)
   help               Show this help
@@ -687,6 +720,7 @@ case "${1:-help}" in
     init)      init_server ;;
     link)      link_to_path ;;
     web)       launch_web_ui ;;
+    update)    update_self ;;
     service)   setup_service ;;
     help|*)    usage ;;
 esac
