@@ -319,7 +319,11 @@ async function get(path) {
 }
 
 // ── Status bar ──
+let _lastStatus = null;
+let _uptimeStart = null;
+
 function updateStatus(data) {
+  _lastStatus = data;
   const dot = $('statusDot');
   const label = $('statusLabel');
   if (data.online) {
@@ -333,27 +337,67 @@ function updateStatus(data) {
   }
   $('memStat').textContent = data.mem_mb ? `${data.mem_mb} MB` : '— MB';
   $('playerStat').textContent = `${data.online_count}/${data.max_players} online`;
-  $('uptimeStat').textContent = data.uptime || '—';
+  if (data.online && data.started_at) {
+    _uptimeStart = new Date(data.started_at).getTime();
+  } else {
+    _uptimeStart = null;
+  }
+  updateUptime();
+  updateDashboardLive(data);
+}
+
+function formatUptime(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function updateUptime() {
+  const val = _uptimeStart ? formatUptime(Date.now() - _uptimeStart) : '—';
+  $('uptimeStat').textContent = val;
+  const du = document.getElementById('dashUptime');
+  if (du) du.textContent = val;
+}
+
+setInterval(updateUptime, 1000);
+
+function updateDashboardLive(data) {
+  const pg = document.getElementById('page-dashboard');
+  if (!pg || !pg.classList.contains('active')) return;
+  const ds = document.getElementById('dashStatus');
+  if (ds) ds.textContent = data.online ? 'Running' : 'Stopped';
+  if (ds) ds.style.color = data.online ? '#5ced73' : '#ff4444';
+  const dp = document.getElementById('dashPlayers');
+  if (dp) dp.textContent = `${data.online_count} / ${data.max_players}`;
+  const dm = document.getElementById('dashMem');
+  if (dm) dm.textContent = `${data.mem_mb || '—'} MB`;
 }
 
 async function pollStatus() {
-  const d = await get('/api/status');
-  updateStatus(d);
+  try {
+    const d = await get('/api/status');
+    updateStatus(d);
+  } catch(e) {}
 }
 
-setInterval(pollStatus, 3000);
+setInterval(pollStatus, 2000);
 pollStatus();
 
 // ── Dashboard ──
 async function loadDashboard() {
-  const d = await get('/api/status');
+  const d = _lastStatus || await get('/api/status');
   const pg = $('page-dashboard');
   pg.innerHTML = `
     <div class="status-grid">
-      <div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" style="color:${d.online?'#5ced73':'#ff4444'}">${d.online?'Running':'Stopped'}</div></div>
-      <div class="stat-card"><div class="sc-label">Players</div><div class="sc-val" style="color:#b388ff">${d.online_count} / ${d.max_players}</div></div>
-      <div class="stat-card"><div class="sc-label">Memory</div><div class="sc-val" style="color:#5ced73">${d.mem_mb||'—'} MB</div></div>
-      <div class="stat-card"><div class="sc-label">Uptime</div><div class="sc-val" style="color:#64b5f6;font-size:18px">${d.uptime||'—'}</div></div>
+      <div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" id="dashStatus" style="color:${d.online?'#5ced73':'#ff4444'}">${d.online?'Running':'Stopped'}</div></div>
+      <div class="stat-card"><div class="sc-label">Players</div><div class="sc-val" id="dashPlayers" style="color:#b388ff">${d.online_count} / ${d.max_players}</div></div>
+      <div class="stat-card"><div class="sc-label">Memory</div><div class="sc-val" id="dashMem" style="color:#5ced73">${d.mem_mb||'—'} MB</div></div>
+      <div class="stat-card"><div class="sc-label">Uptime</div><div class="sc-val" id="dashUptime" style="color:#64b5f6;font-size:18px">—</div></div>
     </div>
     <div class="server-actions">
       <button class="btn btn-start" onclick="api('start')">Start Server</button>
@@ -577,39 +621,43 @@ function setupConsole() {
   const out = $('consoleOutput');
   const es = new EventSource('/api/console');
   consoleStream = es;
-  let lineCount = 0;
   es.onmessage = e => {
     const d = JSON.parse(e.data);
-    if (!d.lines || !d.lines.length) return;
-    if (lineCount > 0 && d.lines.length <= lineCount) return;
-    const newLines = lineCount === 0 ? d.lines : d.lines.slice(lineCount);
-    lineCount = d.lines.length;
-    if (d.lines.length > 0 && out.children.length === 1 && out.children[0].textContent.includes('not running')) {
+    if (!d || !d.lines || !d.lines.length) return;
+    if (d.type === 'history') {
+      out.innerHTML = '';
+      for (const line of d.lines) appendConsoleLine(out, line);
+      out.scrollTop = out.scrollHeight;
+      return;
+    }
+    if (out.children.length === 1 && out.children[0].textContent.includes('not running')) {
       out.innerHTML = '';
     }
-    for (const line of newLines) {
-      const div = document.createElement('div');
-      let cls = '';
-      let text = line;
-      text = text.replace(/\xa7[0-9a-fklmnor]/g, '');
-      text = text.replace(/\u00a7[0-9a-fklmnor]/g, '');
-      if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
-      if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
-      if (/\[.*\/ERROR\]:/.test(line)) cls = 'error';
-      if (/joined the game/.test(line)) cls = 'done';
-      if (/left the game/.test(line)) cls = 'warn';
-      if (/\[.*\/FATAL\]:/.test(line)) cls = 'error';
-      if (/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[Server thread\/INFO\]: Done /.test(line)) cls = 'done';
-      if (/]: .* whispers: /.test(line)) cls = 'say';
-      if (/]: .* </.test(line) && !/]: \[Not Secure\]/.test(line)) cls = 'say';
-      let ts = '';
-      const tm = line.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
-      if (tm) ts = tm[1];
-      div.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${escapeHtml(text)}</span>`;
-      out.appendChild(div);
-    }
+    for (const line of d.lines) appendConsoleLine(out, line);
     out.scrollTop = out.scrollHeight;
   };
+}
+
+function appendConsoleLine(out, line) {
+  const div = document.createElement('div');
+  let cls = '';
+  let text = line;
+  text = text.replace(/\xa7[0-9a-fklmnor]/g, '');
+  text = text.replace(/\u00a7[0-9a-fklmnor]/g, '');
+  if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
+  if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
+  if (/\[.*\/ERROR\]:/.test(line)) cls = 'error';
+  if (/joined the game/.test(line)) cls = 'done';
+  if (/left the game/.test(line)) cls = 'warn';
+  if (/\[.*\/FATAL\]:/.test(line)) cls = 'error';
+  if (/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[Server thread\/INFO\]: Done /.test(line)) cls = 'done';
+  if (/]: .* whispers: /.test(line)) cls = 'say';
+  if (/]: .* </.test(line) && !/]: \[Not Secure\]/.test(line)) cls = 'say';
+  let ts = '';
+  const tm = line.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
+  if (tm) ts = tm[1];
+  div.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${escapeHtml(text)}</span>`;
+  out.appendChild(div);
 }
 
 function clearConsole() {

@@ -112,15 +112,13 @@ def register_routes(app, html):
             nonlocal _console_connections
             _console_connections += 1
             q = mc_state.console_queue
-            hist = mc_state.console_history
-            sent = len(hist)
-            # Send full history first
-            if sent > 0:
-                try:
-                    yield f"data: {json.dumps({'lines': hist[:]})}\n\n"
-                except Exception:
-                    pass
             try:
+                hist = mc_state.console_history
+                if hist:
+                    try:
+                        yield f"data: {json.dumps({'type': 'history', 'lines': hist[:]})}\n\n"
+                    except Exception:
+                        pass
                 while True:
                     try:
                         if request.is_disconnected():
@@ -128,10 +126,10 @@ def register_routes(app, html):
                     except Exception:
                         break
                     try:
-                        line = q.get(timeout=1)
-                        yield f"data: {json.dumps({'lines': [line]})}\n\n"
+                        line = q.get(timeout=5)
+                        yield f"data: {json.dumps({'type': 'new', 'lines': [line]})}\n\n"
                     except queue.Empty:
-                        yield f"data: {json.dumps({'lines': []})}\n\n"
+                        yield ": heartbeat\n\n"
             except Exception:
                 pass
             finally:

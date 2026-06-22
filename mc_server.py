@@ -51,7 +51,7 @@ def poll_status():
                 mc_state.status_cache["players"] = []
                 mc_state.status_cache["mem_mb"] = 0
                 mc_state.status_cache["uptime"] = ""
-        time.sleep(3)
+        time.sleep(2)
 
 
 def start_polling():
