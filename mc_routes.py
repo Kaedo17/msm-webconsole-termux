@@ -16,9 +16,8 @@ from mc_helpers import (
 )
 from mc_server import start_minecraft, stop_minecraft, send_minecraft
 from mc_properties import PROPS_SCHEMA, save_props
-from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download
+from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download, list_installed_packs
 from mc_curseforge import curseforge_search as cf_search, curseforge_versions as cf_versions
-from mc_modrinth import list_installed_packs
 
 
 def register_routes(app, html):
