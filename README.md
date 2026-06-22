@@ -21,6 +21,7 @@ Run a full Minecraft Java server on your Android phone via Termux, with a web da
 pkg install git
 git clone https://github.com/Kaedo17/msm-webconsole-termux
 cd msm-webconsole-termux
+chmod +x install.sh
 ./install.sh
 ```
 
