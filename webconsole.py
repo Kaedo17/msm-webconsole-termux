@@ -214,9 +214,10 @@ HTML = r"""<!DOCTYPE html>
       <div id="packBrowse">
         <div class="pack-search-bar">
           <input type="text" id="packSearchInput" placeholder="Search modpacks & mods..." onkeydown="if(event.key==='Enter')searchPacks()">
-          <select id="packProviderSelect"><option value="modrinth">Modrinth</option><option value="sourceforge">SourceForge</option></select>
-          <select id="packTypeSelect"><option value="modpack">Modpacks</option><option value="mod">Mods</option><option value="resourcepack">Resource Packs</option></select>
+          <select id="packProviderSelect" onchange="searchPacks()"><option value="modrinth">Modrinth</option><option value="sourceforge">SourceForge</option></select>
+          <select id="packTypeSelect" onchange="searchPacks()"><option value="modpack">Modpacks</option><option value="mod">Mods</option><option value="resourcepack">Resource Packs</option></select>
           <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
+          <button class="btn btn-secondary" onclick="searchPacks()" title="Refresh results">&#x21bb;</button>
         </div>
         <div id="packResults"></div>
       </div>

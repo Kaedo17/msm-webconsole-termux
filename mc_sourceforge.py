@@ -1,12 +1,18 @@
-"""SourceForge search integration for browsing modpacks / resource packs."""
+"""SourceForge search integration for browsing modpacks / resource packs.
+
+SourceForge has no public search API, so we scrape the HTML search results
+page and use the Allura REST API (/rest/p/{shortname}/) for project details.
+File listings are scraped from the project files HTML page.
+"""
 
 import json
+import re
 import urllib.parse
 import urllib.request
 
 UA = "mcmanage-termux/1.0"
-
-SF_API = "https://sourceforge.net/rest"
+SF_BASE = "https://sourceforge.net"
+SF_REST = f"{SF_BASE}/rest/p"
 
 
 def _sf_get(url, timeout=15):
@@ -15,91 +21,116 @@ def _sf_get(url, timeout=15):
     return res.read()
 
 
+def _sf_get_html(url, timeout=15):
+    return _sf_get(url, timeout).decode("utf-8", "replace")
+
+
 def sourceforge_search(query, project_type="modpack", limit=20):
-    """Search SourceForge projects via the Allura REST API."""
+    """Search SourceForge projects by scraping the directory search page."""
     try:
-        url = (f"{SF_API}/p/"
-               f"?q={urllib.parse.quote(query)}"
-               f"&limit={limit}"
-               f"&private=false&public=true&deleted=false")
-        raw = _sf_get(url)
-        data = json.loads(raw)
-        hits = []
-        for item in data.get("projects", [])[:limit]:
-            shortname = item.get("shortname", "")
-            title = item.get("name", shortname)
-            desc = item.get("short_description", "") or item.get("summary", "")
-            dev_obj = item.get("developers", [])
-            if isinstance(dev_obj, list):
-                author = ", ".join(
-                    d.get("username", "") if isinstance(d, dict) else str(d)
-                    for d in dev_obj[:3]
-                )
-            else:
-                author = str(dev_obj)
-            icon = item.get("icon_url", "")
-            if not icon:
-                icon = f"https://sourceforge.net/p/{shortname}/icon"
-            hits.append({
-                "id": shortname,
-                "title": title,
-                "description": desc,
-                "icon_url": icon,
-                "author": author,
-                "downloads": 0,
-                "slug": shortname,
-                "latest_version": "",
-                "project_type": project_type,
-                "provider": "sourceforge",
-            })
-        return hits
+        url = f"{SF_BASE}/directory/?q={urllib.parse.quote(query)}"
+        html = _sf_get_html(url)
+
+        seen = set()
+        for m in re.finditer(r'/projects/([a-zA-Z0-9._-]+)/?', html):
+            shortname = m.group(1).removesuffix(".mirror")
+            if shortname in seen or shortname in ("forge",):
+                continue
+            seen.add(shortname)
+
+        results = []
+        for shortname in list(seen)[:limit]:
+            entry = _get_project_info(shortname, project_type)
+            if entry:
+                results.append(entry)
+
+        return results
     except Exception as e:
         return {"error": str(e)}
 
 
-def sourceforge_versions(project_id, limit=20):
-    """Fetch available files for a SourceForge project via the Allura REST API."""
+def _get_project_info(shortname, project_type="modpack"):
+    """Fetch project metadata from Allura REST endpoint."""
     try:
-        url = f"{SF_API}/p/{project_id}/files/"
+        url = f"{SF_REST}/{shortname}/"
         raw = _sf_get(url)
         data = json.loads(raw)
+        title = data.get("name", shortname)
+        desc = data.get("short_description", "") or data.get("summary", "")
+        dev_obj = data.get("developers", [])
+        if isinstance(dev_obj, list):
+            author = ", ".join(
+                d.get("username", "") if isinstance(d, dict) else str(d)
+                for d in dev_obj[:3]
+            )
+        else:
+            author = str(dev_obj)
+        icon = data.get("icon_url", "") or f"{SF_BASE}/p/{shortname}/icon"
+        return {
+            "id": shortname,
+            "title": title,
+            "description": desc,
+            "icon_url": icon,
+            "author": author,
+            "downloads": 0,
+            "slug": shortname,
+            "latest_version": "",
+            "project_type": project_type,
+            "provider": "sourceforge",
+        }
+    except Exception:
+        return {
+            "id": shortname,
+            "title": shortname,
+            "description": "",
+            "icon_url": f"{SF_BASE}/p/{shortname}/icon",
+            "author": "",
+            "downloads": 0,
+            "slug": shortname,
+            "latest_version": "",
+            "project_type": project_type,
+            "provider": "sourceforge",
+        }
+
+
+def sourceforge_versions(project_id, limit=20):
+    """Scrape file/folder listing from the SourceForge project files HTML page."""
+    try:
+        url = f"{SF_BASE}/projects/{project_id}/files/"
+        try:
+            html = _sf_get_html(url)
+        except Exception:
+            return []
+
         versions = []
+        seen = set()
 
-        def walk(node, path=""):
-            if not isinstance(node, dict):
-                return
-            for entry in node.get("filenames", {}).values() if isinstance(node.get("filenames"), dict) else []:
-                _extract_file(entry, project_id, versions)
-            for child in node.get("folders", []):
-                if isinstance(child, dict):
-                    child_path = child.get("path", path)
-                    walk(child, child_path)
-            for child in node.get("files", []):
-                if isinstance(child, dict):
-                    _extract_file(child, project_id, versions, path)
+        for m in re.finditer(
+            rf'href="/projects/{re.escape(project_id)}/files/([^"]+)"', html
+        ):
+            path = m.group(1)
+            if path in seen or "/stats/" in path or path.endswith("download"):
+                continue
+            seen.add(path)
 
-        def _extract_file(entry, project_id, versions, path_prefix=""):
-            name = entry.get("name", entry.get("filename", ""))
-            if not name:
-                return
-            size = entry.get("size", 0)
-            file_path = entry.get("path", f"{path_prefix}/{name}" if path_prefix else name)
-            url_path = (f"https://sourceforge.net/projects/{project_id}"
-                        f"/files/{file_path}/download")
+            name = path.rstrip("/").rsplit("/", 1)[-1]
+            url_path = f"{SF_BASE}/projects/{project_id}/files/{path}download"
+
+            is_folder = path.endswith("/")
+
             versions.append({
-                "id": file_path,
+                "id": path,
                 "name": name,
                 "version_number": name,
                 "game_versions": [],
                 "loaders": [],
-                "files": [{"url": url_path, "filename": name, "size": size}],
-                "date": entry.get("mod_date", entry.get("date", "")),
+                "files": [{"url": url_path, "filename": name, "size": 0}],
+                "date": "",
             })
 
-        walk(data)
-        if not versions:
-            for entry in data.get("filenames", {}).values():
-                _extract_file(entry, project_id, versions)
+            if len(versions) >= limit:
+                break
+
         return versions[:limit]
     except Exception as e:
         return {"error": str(e)}
