@@ -16,7 +16,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from flask import Flask
+try:
+    from flask import Flask
+except ImportError:
+    import subprocess
+    print("Installing Flask...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
+    from flask import Flask
+
+import mc_state
+from mc_state import load_config
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Create Flask app — MUST come before route imports
