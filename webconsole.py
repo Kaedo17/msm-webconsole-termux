@@ -5,6 +5,7 @@ Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -14,6 +15,9 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.parse
+import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,9 +66,155 @@ def load_config():
 def save_config():
     cf = config_path()
     try:
-        cf.write_text(json.dumps({"min_ram": MIN_RAM, "max_ram": MAX_RAM}, indent=2))
+        d = {"min_ram": MIN_RAM, "max_ram": MAX_RAM}
+        if cf.exists():
+            try:
+                old = json.loads(cf.read_text())
+                d.update(old)
+            except Exception:
+                pass
+        d["min_ram"] = MIN_RAM
+        d["max_ram"] = MAX_RAM
+        cf.write_text(json.dumps(d, indent=2))
     except Exception:
         pass
+
+# ── Server properties schema ─────────────────────────────────────────
+
+PROPS_SCHEMA = {
+    "online-mode":           {"type": "bool",   "cat": "server",   "label": "Online Mode",       "desc": "Authenticate players with Mojang"},
+    "difficulty":            {"type": "enum",   "cat": "gameplay", "label": "Difficulty",         "desc": "Game difficulty", "opts": ["peaceful","easy","normal","hard"]},
+    "gamemode":              {"type": "enum",   "cat": "gameplay", "label": "Default Gamemode",   "desc": "Default game mode for new players", "opts": ["survival","creative","adventure","spectator"]},
+    "pvp":                   {"type": "bool",   "cat": "gameplay", "label": "PvP",               "desc": "Allow player versus player combat"},
+    "hardcore":              {"type": "bool",   "cat": "gameplay", "label": "Hardcore",           "desc": "Ban on death"},
+    "enable-command-block":  {"type": "bool",   "cat": "server",   "label": "Command Blocks",    "desc": "Enable command blocks"},
+    "spawn-monsters":        {"type": "bool",   "cat": "world",    "label": "Spawn Monsters",     "desc": "Natural monster spawning"},
+    "spawn-animals":         {"type": "bool",   "cat": "world",    "label": "Spawn Animals",      "desc": "Natural animal spawning"},
+    "spawn-npcs":            {"type": "bool",   "cat": "world",    "label": "Spawn NPCs",         "desc": "Natural villager spawning"},
+    "allow-flight":          {"type": "bool",   "cat": "gameplay", "label": "Allow Flight",       "desc": "Allow flying without cheat"},
+    "white-list":            {"type": "bool",   "cat": "server",   "label": "Whitelist",          "desc": "Only whitelisted players can join"},
+    "enforce-whitelist":     {"type": "bool",   "cat": "server",   "label": "Enforce Whitelist",  "desc": "Kick non-whitelisted players on reload"},
+    "enable-query":          {"type": "bool",   "cat": "network",  "label": "Query",              "desc": "Enable GameSpy query protocol"},
+    "enable-rcon":           {"type": "bool",   "cat": "network",  "label": "RCON",               "desc": "Enable remote console access"},
+    "broadcast-rcon-to-ops": {"type": "bool",   "cat": "network",  "label": "Broadcast RCON",     "desc": "Broadcast RCON commands to ops"},
+    "prevent-proxy-connections":{"type": "bool","cat": "network",  "label": "Prevent Proxy",      "desc": "Block proxy connections"},
+    "sync-chunk-writes":     {"type": "bool",   "cat": "world",    "label": "Sync Chunk Writes",  "desc": "Sync world writes to disk"},
+    "max-players":           {"type": "number", "cat": "server",   "label": "Max Players",        "desc": "Maximum concurrent players", "min": 1, "max": 100},
+    "view-distance":         {"type": "number", "cat": "world",    "label": "View Distance",      "desc": "Client view radius in chunks", "min": 2, "max": 32},
+    "simulation-distance":   {"type": "number", "cat": "world",    "label": "Sim Distance",       "desc": "Entity simulation radius", "min": 2, "max": 32},
+    "server-port":           {"type": "number", "cat": "network",  "label": "Server Port",        "desc": "Port to listen on", "min": 1, "max": 65535},
+    "spawn-protection":      {"type": "number", "cat": "world",    "label": "Spawn Protection",   "desc": "Radius around spawn protected", "min": 0},
+    "player-idle-timeout":   {"type": "number", "cat": "server",   "label": "Idle Timeout",       "desc": "Kick idle players after (minutes)", "min": 0},
+    "max-world-size":        {"type": "number", "cat": "world",    "label": "Max World Size",     "desc": "World border radius", "min": 1},
+    "rate-limit":            {"type": "number", "cat": "network",  "label": "Rate Limit",         "desc": "Packets per second limit", "min": 0},
+    "max-tick-time":         {"type": "number", "cat": "server",   "label": "Max Tick Time",      "desc": "Max ms per tick before watchdog", "min": 0},
+    "entity-broadcast-range-percentage": {"type": "number", "cat": "world", "label": "Entity Range %", "desc": "Entity tracking range %", "min": 10, "max": 1000},
+    "network-compression-threshold": {"type": "number", "cat": "network", "label": "Compression", "desc": "Network compression threshold", "min": -1},
+    "motd":                  {"type": "string", "cat": "server",   "label": "MOTD",              "desc": "Message of the Day"},
+    "resource-pack":         {"type": "string", "cat": "server",   "label": "Resource Pack URL", "desc": "URL to a resource pack"},
+    "resource-pack-sha1":    {"type": "string", "cat": "server",   "label": "Pack SHA1",         "desc": "SHA1 hash of the resource pack"},
+    "level-name":            {"type": "string", "cat": "world",    "label": "World Name",        "desc": "World folder name"},
+    "level-seed":            {"type": "string", "cat": "world",    "label": "World Seed",        "desc": "Random seed for world generation"},
+    "generator-settings":    {"type": "string", "cat": "world",    "label": "Generator Settings", "desc": "Superflat/amplified settings"},
+}
+
+def save_props(changes):
+    pf = SERVER_DIR / "server.properties"
+    if not pf.exists():
+        return False, "server.properties not found"
+    lines = pf.read_text(encoding="utf-8").splitlines(keepends=True)
+    changed = set(changes.keys())
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k = stripped.split("=", 1)[0].strip()
+            if k in changed:
+                lines[i] = f"{k}={changes[k]}\n"
+                changed.discard(k)
+    for k in changed:
+        lines.append(f"{k}={changes[k]}\n")
+    pf.write_text("".join(lines), encoding="utf-8")
+    return True, "Properties saved"
+
+# ── Modrinth helpers ──────────────────────────────────────────────────
+
+MODRINTH_API = "https://api.modrinth.com/v2"
+
+def modrinth_search(query, project_type="modpack", limit=20):
+    url = f"{MODRINTH_API}/search?query={urllib.parse.quote(query)}&facets={urllib.parse.quote(json.dumps([[f'project_type:{project_type}']]))}&limit={limit}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "mcmanage-termux/1.0"})
+        res = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(res.read())
+        hits = []
+        for h in data.get("hits", []):
+            hits.append({
+                "id": h["project_id"],
+                "title": h["title"],
+                "description": h.get("description", ""),
+                "icon_url": h.get("icon_url", ""),
+                "author": h.get("author", ""),
+                "downloads": h.get("downloads", 0),
+                "slug": h.get("slug", ""),
+                "latest_version": h.get("latest_version", ""),
+                "project_type": h.get("project_type", project_type),
+            })
+        return hits
+    except Exception as e:
+        return {"error": str(e)}
+
+def modrinth_versions(project_id):
+    url = f"{MODRINTH_API}/project/{project_id}/version"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "mcmanage-termux/1.0"})
+        res = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(res.read())
+        versions = []
+        for v in data:
+            versions.append({
+                "id": v["id"],
+                "name": v["name"],
+                "version_number": v["version_number"],
+                "game_versions": v.get("game_versions", []),
+                "loaders": v.get("loaders", []),
+                "files": [{
+                    "url": f["url"],
+                    "filename": f["filename"],
+                    "size": f["size"],
+                } for f in v.get("files", [])],
+                "date": v.get("date_published", ""),
+            })
+        return versions
+    except Exception as e:
+        return {"error": str(e)}
+
+def modrinth_download(file_url, dest_path):
+    req = urllib.request.Request(file_url, headers={"User-Agent": "mcmanage-termux/1.0"})
+    res = urllib.request.urlopen(req, timeout=60)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest_path, "wb") as f:
+        while True:
+            chunk = res.read(8192)
+            if not chunk:
+                break
+            f.write(chunk)
+    return dest_path
+
+def list_installed_packs():
+    mods_dir = SERVER_DIR / "mods"
+    rp_dir = SERVER_DIR / "resourcepacks"
+    result = []
+    for d, pack_type in [(mods_dir, "mod"), (rp_dir, "resourcepack")]:
+        if d.exists():
+            for f in sorted(d.iterdir()):
+                if f.suffix in (".jar", ".zip"):
+                    result.append({
+                        "name": f.name,
+                        "path": str(f.relative_to(SERVER_DIR)),
+                        "size": f.stat().st_size,
+                        "type": pack_type,
+                    })
+    return result
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -401,6 +551,99 @@ def api_backup_restore():
         tar.extractall(path=str(SERVER_DIR))
     return ok({"message": f"Restored from {name}."})
 
+# ── Properties API ────────────────────────────────────────────────────
+
+@app.route("/api/properties", methods=["GET", "POST"])
+def api_properties():
+    if request.method == "GET":
+        props = get_props()
+        schema = PROPS_SCHEMA
+        rich = {}
+        for k, v in props.items():
+            entry = dict(schema.get(k, {"type": "string", "cat": "other", "label": k, "desc": ""}))
+            entry["key"] = k
+            entry["value"] = v
+            rich[k] = entry
+        # Also include schema-only keys not yet in file
+        for k, s in schema.items():
+            if k not in rich:
+                entry = dict(s)
+                entry["key"] = k
+                entry["value"] = s.get("default", "")
+                rich[k] = entry
+        return ok({"properties": list(rich.values())})
+    data = request.get_json(silent=True) or {}
+    changes = data.get("changes", {})
+    if not changes:
+        return fail("No changes provided.")
+    if server_proc and server_proc.poll() is None:
+        return fail("Stop the server for some property changes to take effect, or restart after saving.")
+    ok_, msg = save_props(changes)
+    return ok({"message": msg}) if ok_ else fail(msg)
+
+# ── Modpacks / Resource Packs API ────────────────────────────────────
+
+@app.route("/api/packs/search")
+def api_packs_search():
+    q = request.args.get("q", "")
+    pt = request.args.get("type", "modpack")
+    prov = request.args.get("provider", "modrinth")
+    if not q:
+        return fail("Search query required.")
+    if prov == "modrinth":
+        results = modrinth_search(q, pt)
+        if isinstance(results, dict) and "error" in results:
+            return fail(results["error"])
+        return ok({"results": results, "provider": prov, "type": pt})
+    return fail(f"Unknown provider: {prov}")
+
+@app.route("/api/packs/versions")
+def api_packs_versions():
+    pid = request.args.get("id", "")
+    if not pid:
+        return fail("Project ID required.")
+    versions = modrinth_versions(pid)
+    if isinstance(versions, dict) and "error" in versions:
+        return fail(versions["error"])
+    return ok({"versions": versions})
+
+@app.route("/api/packs/install", methods=["POST"])
+def api_packs_install():
+    data = request.get_json(silent=True) or {}
+    file_url = data.get("file_url", "")
+    filename = data.get("filename", "pack.zip")
+    pack_type = data.get("type", "modpack")
+    if not file_url:
+        return fail("No file URL provided.")
+    if pack_type == "resourcepack":
+        dest_dir = SERVER_DIR / "resourcepacks"
+    else:
+        dest_dir = SERVER_DIR / "mods"
+    dest = dest_dir / filename
+    try:
+        modrinth_download(file_url, dest)
+    except Exception as e:
+        return fail(f"Download failed: {e}")
+    return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(SERVER_DIR))})
+
+@app.route("/api/packs/installed")
+def api_packs_installed():
+    return ok({"packs": list_installed_packs()})
+
+@app.route("/api/packs/remove", methods=["POST"])
+def api_packs_remove():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path", "")
+    if not path:
+        return fail("No path provided.")
+    target = (SERVER_DIR / path).resolve()
+    if not str(target).startswith(str(SERVER_DIR.resolve())):
+        return fail("Access denied.")
+    if not target.exists():
+        return fail("File not found.")
+    target.unlink()
+    return ok({"message": f"Removed {target.name}"})
+
 # ── HTML ──────────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
@@ -489,6 +732,42 @@ HTML = r"""<!DOCTYPE html>
   .modal-box input{width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;margin-bottom:12px;outline:none}
   .modal-box input:focus{border-color:#5ced73}
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+  .props-cat{margin-bottom:20px}
+  .props-cat h4{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #2a2a2a}
+  .prop-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#151515;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px}
+  .prop-row .pr-label{font-size:13px}
+  .prop-row .pr-label small{display:block;font-size:11px;color:#666;margin-top:2px}
+  .toggle{position:relative;width:44px;height:24px;flex-shrink:0}
+  .toggle input{opacity:0;width:0;height:0}
+  .toggle .slider{position:absolute;cursor:pointer;inset:0;background:#333;border-radius:12px;transition:.2s}
+  .toggle .slider::before{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#888;top:3px;left:3px;transition:.2s}
+  .toggle input:checked+.slider{background:#2e7d32}
+  .toggle input:checked+.slider::before{background:#fff;transform:translateX(20px)}
+  .prop-row select,.prop-row input[type=number],.prop-row input[type=text]{padding:6px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:13px;outline:none;width:160px}
+  .prop-row select:focus,.prop-row input:focus{border-color:#5ced73}
+  .props-save-bar{position:sticky;bottom:0;padding:12px 0;text-align:right}
+  .pack-search-bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  .pack-search-bar input{flex:1;min-width:200px;padding:10px 14px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none}
+  .pack-search-bar input:focus{border-color:#5ced73}
+  .pack-search-bar select{padding:10px 14px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none}
+  .pack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .pack-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:14px;display:flex;gap:12px;transition:.15s}
+  .pack-card:hover{border-color:#444}
+  .pack-card img{width:48px;height:48px;border-radius:6px;flex-shrink:0;object-fit:cover;background:#111}
+  .pack-card .pc-body{flex:1;min-width:0}
+  .pack-card .pc-body h4{font-size:14px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pack-card .pc-body p{font-size:12px;color:#888;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .pack-card .pc-body .pc-meta{font-size:11px;color:#666;margin-top:6px}
+  .pack-card .pc-body .pc-meta span{margin-right:10px}
+  .pack-subnav{display:flex;gap:8px;margin-bottom:16px}
+  .pack-subnav button{padding:8px 18px;border:1px solid #333;border-radius:6px;background:#1a1a1a;color:#aaa;font-size:13px;cursor:pointer}
+  .pack-subnav button.active{background:#2e7d32;color:#fff;border-color:#2e7d32}
+  .installed-list{display:grid;gap:8px}
+  .installed-item{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px}
+  .installed-item .ii-info{font-size:13px}
+  .installed-item .ii-info strong{color:#ccc}
+  .installed-item .ii-info span{color:#888;margin-left:8px}
+  .search-status{padding:12px;text-align:center;color:#666;font-size:13px}
   @media(max-width:768px){.sidebar{display:none}.content{padding:12px}}
 </style>
 </head>
@@ -498,6 +777,8 @@ HTML = r"""<!DOCTYPE html>
   <nav>
     <a href="#" class="active" data-page="dashboard">Dashboard</a>
     <a href="#" data-page="console">Console</a>
+    <a href="#" data-page="properties">Settings</a>
+    <a href="#" data-page="packs">Modpacks</a>
     <a href="#" data-page="files">File Manager</a>
     <a href="#" data-page="backups">Backups</a>
   </nav>
@@ -528,6 +809,22 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="page" id="page-files"><div id="fileBrowser" class="loading">Loading files...</div></div>
+    <div class="page" id="page-properties"></div>
+    <div class="page" id="page-packs">
+      <div class="pack-subnav">
+        <button class="active" id="packBrowseBtn" onclick="showPackTab('browse')">Browse</button>
+        <button id="packInstalledBtn" onclick="showPackTab('installed')">Installed</button>
+      </div>
+      <div id="packBrowse">
+        <div class="pack-search-bar">
+          <input type="text" id="packSearchInput" placeholder="Search modpacks..." onkeydown="if(event.key==='Enter')searchPacks()">
+          <select id="packTypeSelect"><option value="modpack">Modpacks</option><option value="resourcepack">Resource Packs</option></select>
+          <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
+        </div>
+        <div id="packResults"></div>
+      </div>
+      <div id="packInstalled" style="display:none"><div id="packInstalledList"></div></div>
+    </div>
     <div class="page" id="page-backups">
       <div class="server-actions">
         <button class="btn btn-backup" onclick="createBackup()">Create Backup</button>
@@ -559,6 +856,15 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
+<div class="modal" id="versionModal">
+  <div class="modal-box">
+    <h3 id="versionModalTitle">Select Version</h3>
+    <div id="versionList"></div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn btn-secondary" onclick="closeModal('versionModal')">Cancel</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -586,6 +892,8 @@ function showPage(name) {
   if (name === 'files') loadFileTree();
   if (name === 'backups') loadBackups();
   if (name === 'dashboard') loadDashboard();
+  if (name === 'properties') loadProperties();
+  if (name === 'packs') { loadInstalledPacks(); }
 }
 
 // ── Toast ──
@@ -689,6 +997,170 @@ async function saveRam() {
   const d = await api('ram', {min_ram: min, max_ram: max});
   btn.textContent = 'Save RAM';
   btn.disabled = false;
+}
+
+// ── Properties / Settings ──
+async function loadProperties() {
+  const d = await get('/api/properties');
+  if (!d.ok) { $('page-properties').innerHTML = `<div class="search-status">${d.error}</div>`; return; }
+  const props = d.properties || [];
+  const cats = {};
+  for (const p of props) {
+    const cat = p.cat || 'other';
+    if (!cats[cat]) cats[cat] = [];
+    cats[cat].push(p);
+  }
+  const catOrder = ['server', 'gameplay', 'world', 'network', 'other'];
+  let html = '';
+  for (const c of catOrder) {
+    if (!cats[c]) continue;
+    html += `<div class="props-cat"><h4>${c.charAt(0).toUpperCase() + c.slice(1)}</h4>`;
+    for (const p of cats[c]) {
+      html += `<div class="prop-row" data-key="${p.key}"><div class="pr-label">${escapeHtml(p.label)}<small>${escapeHtml(p.desc)}</small></div>`;
+      const val = p.value;
+      if (p.type === 'bool') {
+        const checked = val === 'true' ? 'checked' : '';
+        html += `<label class="toggle"><input type="checkbox" ${checked} onchange="propChanged('${p.key}',this.checked?'true':'false')"><span class="slider"></span></label>`;
+      } else if (p.type === 'enum') {
+        html += `<select onchange="propChanged('${p.key}',this.value)">`;
+        for (const o of (p.opts || [])) {
+          html += `<option value="${o}" ${o===val?'selected':''}>${o}</option>`;
+        }
+        html += `</select>`;
+      } else if (p.type === 'number') {
+        html += `<input type="number" value="${escapeHtml(val)}" ${p.min!==undefined?`min="${p.min}"`:''} ${p.max!==undefined?`max="${p.max}"`:''} onchange="propChanged('${p.key}',this.value)">`;
+      } else {
+        html += `<input type="text" value="${escapeHtml(val)}" onchange="propChanged('${p.key}',this.value)">`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += `<div class="props-save-bar"><button class="btn btn-save" onclick="saveProperties()" id="propsSaveBtn">Save Properties</button></div>`;
+  $('page-properties').innerHTML = html;
+  window._propChanges = {};
+}
+
+function propChanged(key, value) {
+  if (!window._propChanges) window._propChanges = {};
+  window._propChanges[key] = value;
+}
+
+async function saveProperties() {
+  const changes = window._propChanges || {};
+  if (!Object.keys(changes).length) { toast('No changes to save', 'info'); return; }
+  const btn = $('propsSaveBtn');
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+  const d = await api('properties', {changes});
+  btn.textContent = 'Save Properties';
+  btn.disabled = false;
+  if (d.ok) {
+    window._propChanges = {};
+    toast('Properties saved — restart server to apply', 'success');
+  }
+}
+
+// ── Modpacks / Resource Packs ──
+function showPackTab(tab) {
+  $('packBrowse').style.display = tab === 'browse' ? 'block' : 'none';
+  $('packInstalled').style.display = tab === 'installed' ? 'block' : 'none';
+  $('packBrowseBtn').className = tab === 'browse' ? 'active' : '';
+  $('packInstalledBtn').className = tab === 'installed' ? 'active' : '';
+  if (tab === 'installed') loadInstalledPacks();
+}
+
+let _packSearchTimeout = null;
+
+async function searchPacks() {
+  const q = $('packSearchInput').value.trim();
+  const type = $('packTypeSelect').value;
+  if (!q) { toast('Enter a search term', 'info'); return; }
+  const container = $('packResults');
+  container.innerHTML = '<div class="search-status">Searching...</div>';
+  const d = await get(`/api/packs/search?q=${encodeURIComponent(q)}&type=${type}`);
+  if (!d.ok || !d.results) { container.innerHTML = `<div class="search-status">${d.error||'No results'}</div>`; return; }
+  if (!d.results.length) { container.innerHTML = '<div class="search-status">No results found</div>'; return; }
+  let html = '<div class="pack-grid">';
+  for (const r of d.results) {
+    const icon = r.icon_url || '';
+    const dl = r.downloads >= 1000 ? Math.floor(r.downloads/1000)+'k' : r.downloads;
+    html += `<div class="pack-card">
+      <img src="${icon}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 48 48%22><rect fill=%22%23333%22 width=%2248%22 height=%2248%22/><text x=%2224%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2224%22>?</text></svg>'">
+      <div class="pc-body">
+        <h4>${escapeHtml(r.title)}</h4>
+        <p>${escapeHtml(r.description)}</p>
+        <div class="pc-meta">
+          <span>${escapeHtml(r.author)}</span>
+          <span>${dl} downloads</span>
+          <span>${r.latest_version||''}</span>
+        </div>
+        <button class="btn btn-cmd" style="padding:4px 12px;font-size:12px;margin-top:6px" onclick="showVersions('${r.id}','${escapeHtml(r.title)}','${type}')">Install</button>
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+async function showVersions(projectId, title, packType) {
+  $('versionModalTitle').textContent = `Versions — ${title}`;
+  $('versionList').innerHTML = '<div class="search-status">Loading...</div>';
+  $('versionModal').classList.add('show');
+  const d = await get(`/api/packs/versions?id=${projectId}`);
+  if (!d.ok || !d.versions) { $('versionList').innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
+  if (!d.versions.length) { $('versionList').innerHTML = '<div class="search-status">No versions found</div>'; return; }
+  let html = '<div style="max-height:300px;overflow-y:auto">';
+  for (const v of d.versions) {
+    const gameVer = (v.game_versions||[]).slice(0,3).join(', ') + ((v.game_versions||[]).length > 3 ? '...' : '');
+    const loaders = (v.loaders||[]).join(', ');
+    for (const f of (v.files||[]).slice(0,1)) {
+      const size = f.size >= 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
+      html += `<div style="padding:10px;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;background:#151515">
+        <div style="font-size:13px"><strong>${escapeHtml(v.name)}</strong> <span style="color:#888">${v.version_number}</span></div>
+        <div style="font-size:12px;color:#666;margin:4px 0">${gameVer} | ${loaders} | ${size}</div>
+        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="installPack('${f.url}','${f.filename}','${packType}')">Download</button>
+      </div>`;
+    }
+  }
+  html += '</div>';
+  $('versionList').innerHTML = html;
+}
+
+async function installPack(fileUrl, filename, packType) {
+  closeModal('versionModal');
+  toast('Installing...', 'info');
+  const d = await api('packs/install', {file_url: fileUrl, filename, type: packType});
+  if (d.ok) {
+    toast(`Installed ${filename}`, 'success');
+    loadInstalledPacks();
+  }
+}
+
+async function loadInstalledPacks() {
+  const d = await get('/api/packs/installed');
+  const container = $('packInstalledList');
+  if (!d.ok || !d.packs || !d.packs.length) {
+    container.innerHTML = '<div class="search-status">Nothing installed yet</div>';
+    return;
+  }
+  let html = '<div class="installed-list">';
+  for (const p of d.packs) {
+    const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' MB' : (p.size/1024).toFixed(0)+' KB';
+    const label = p.type === 'mod' ? 'Mod' : 'Resource Pack';
+    html += `<div class="installed-item">
+      <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
+      <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>
+    </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+async function removePack(path, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  const d = await api('packs/remove', {path});
+  if (d.ok) { toast(`Removed ${name}`, 'success'); loadInstalledPacks(); }
 }
 
 // ── Console ──
