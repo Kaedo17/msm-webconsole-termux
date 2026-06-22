@@ -3,7 +3,7 @@
 
 set -e
 
-REPO_URL="https://raw.githubusercontent.com/YOUR_USER/mcmanage/main"
+REPO_URL="https://raw.githubusercontent.com/Kaedo17/mcmanage/main"
 INSTALL_DIR="$HOME/.local/bin"
 TARGET="$INSTALL_DIR/mcmanage"
 WEB_PY="$INSTALL_DIR/webconsole.py"
