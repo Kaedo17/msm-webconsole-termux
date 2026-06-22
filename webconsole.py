@@ -214,7 +214,7 @@ HTML = r"""<!DOCTYPE html>
       <div id="packBrowse">
         <div class="pack-search-bar">
           <input type="text" id="packSearchInput" placeholder="Search modpacks & mods..." onkeydown="if(event.key==='Enter')searchPacks()">
-          <select id="packProviderSelect" onchange="searchPacks()"><option value="modrinth">Modrinth</option><option value="sourceforge">SourceForge</option></select>
+          <select id="packProviderSelect" onchange="searchPacks()"><option value="modrinth">Modrinth</option><option value="curseforge">CurseForge</option></select>
           <select id="packTypeSelect" onchange="searchPacks()"><option value="modpack">Modpacks</option><option value="mod">Mods</option><option value="resourcepack">Resource Packs</option></select>
           <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
           <button class="btn btn-secondary" onclick="searchPacks()" title="Refresh results">&#x21bb;</button>
@@ -485,7 +485,7 @@ async function searchPacks(auto) {
   for (const r of d.results) {
     const icon = r.icon_url || '';
     const dl = r.downloads >= 1000 ? Math.floor(r.downloads/1000)+'k' : r.downloads;
-    const provLabel = r.provider === 'sourceforge' ? '<span style="color:#f90">SourceForge</span>' : '<span style="color:#5ced73">Modrinth</span>';
+    const provLabel = r.provider === 'curseforge' ? '<span style="color:#f90">CurseForge</span>' : '<span style="color:#5ced73">Modrinth</span>';
     html += `<div class="pack-card">
       <img src="${icon}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 48 48%22><rect fill=%22%23333%22 width=%2248%22 height=%2248%22/><text x=%2224%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2224%22>?</text></svg>'">
       <div class="pc-body">
@@ -532,6 +532,11 @@ async function showVersions(projectId, title, packType, provider) {
 
 async function installPack(fileUrl, filename, packType) {
   closeModal('versionModal');
+  if (!fileUrl || fileUrl.includes('curseforge.com')) {
+    window.open(fileUrl, '_blank');
+    toast('Opening download in browser...', 'info');
+    return;
+  }
   toast('Installing...', 'info');
   const d = await api('packs/install', {file_url: fileUrl, filename, type: packType});
   if (d.ok) {

@@ -17,7 +17,7 @@ from mc_helpers import (
 from mc_server import start_minecraft, stop_minecraft, send_minecraft
 from mc_properties import PROPS_SCHEMA, save_props
 from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download
-from mc_sourceforge import sourceforge_search as sf_search, sourceforge_versions as sf_versions
+from mc_curseforge import curseforge_search as cf_search, curseforge_versions as cf_versions
 from mc_modrinth import list_installed_packs
 
 
@@ -282,8 +282,8 @@ def register_routes(app, html):
             return fail("Search query required.")
         if prov == "modrinth":
             results = modrinth_search(q, pt)
-        elif prov == "sourceforge":
-            results = sf_search(q, pt)
+        elif prov == "curseforge":
+            results = cf_search(q, pt)
         else:
             return fail(f"Unknown provider: {prov}")
         if isinstance(results, dict) and "error" in results:
@@ -298,8 +298,8 @@ def register_routes(app, html):
             return fail("Project ID required.")
         if prov == "modrinth":
             versions = modrinth_versions(pid)
-        elif prov == "sourceforge":
-            versions = sf_versions(pid)
+        elif prov == "curseforge":
+            versions = cf_versions(pid)
         else:
             versions = modrinth_versions(pid)
         if isinstance(versions, dict) and "error" in versions:
