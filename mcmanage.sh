@@ -563,6 +563,28 @@ link_to_path() {
     fi
 }
 
+launch_web_ui() {
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    local web_py="$script_dir/webconsole.py"
+    if [ ! -f "$web_py" ]; then
+        web_py="$SCRIPT_DIR/webconsole.py"
+    fi
+    if [ ! -f "$web_py" ]; then
+        err "webconsole.py not found alongside mcmanage.sh"
+        err "Download it from the same repository as mcmanage.sh"
+        return 1
+    fi
+    if ! command -v python3 &>/dev/null; then
+        err "Python 3 not found. Install: pkg install python"
+        return 1
+    fi
+    info "Launching web UI..."
+    info "Open http://localhost:5000 in your browser"
+    echo
+    python3 "$web_py" --dir "$SERVER_DIR"
+}
+
 usage() {
     cat <<EOF
 \e[36mMinecraft Server Manager for Termux\e[0m
@@ -588,6 +610,7 @@ usage() {
   optimize           Apply optimization tweaks to server.properties
   install            Download and install a server jar
   service            Create a termux-services entry
+  web                Launch web management UI (Python Flask app)
   help               Show this help
 
 \e[33mQuick start:\e[0m
@@ -637,6 +660,7 @@ case "${1:-help}" in
     install)   install ;;
     init)      init_server ;;
     link)      link_to_path ;;
+    web)       launch_web_ui ;;
     service)   setup_service ;;
     help|*)    usage ;;
 esac
