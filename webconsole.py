@@ -174,7 +174,7 @@ HTML = r"""<!DOCTYPE html>
     <a href="#" class="active" data-page="dashboard">Dashboard</a>
     <a href="#" data-page="console">Console</a>
     <a href="#" data-page="properties">Settings</a>
-    <a href="#" data-page="packs">Modpacks</a>
+    <a href="#" data-page="packs">Packs</a>
     <a href="#" data-page="files">File Manager</a>
     <a href="#" data-page="backups">Backups</a>
   </nav>
@@ -214,7 +214,8 @@ HTML = r"""<!DOCTYPE html>
       <div id="packBrowse">
         <div class="pack-search-bar">
           <input type="text" id="packSearchInput" placeholder="Search modpacks..." onkeydown="if(event.key==='Enter')searchPacks()">
-          <select id="packTypeSelect"><option value="modpack">Modpacks</option><option value="resourcepack">Resource Packs</option></select>
+          <select id="packProviderSelect"><option value="modrinth">Modrinth</option><option value="sourceforge">SourceForge</option></select>
+          <select id="packTypeSelect"><option value="modpack">Packs</option><option value="resourcepack">Resource Packs</option></select>
           <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
         </div>
         <div id="packResults"></div>
@@ -289,7 +290,7 @@ function showPage(name) {
   if (name === 'backups') loadBackups();
   if (name === 'dashboard') loadDashboard();
   if (name === 'properties') loadProperties();
-  if (name === 'packs') { loadInstalledPacks(); }
+  if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
 }
 
 // ── Toast ──
@@ -466,19 +467,24 @@ function showPackTab(tab) {
   if (tab === 'installed') loadInstalledPacks();
 }
 
-async function searchPacks() {
-  const q = $('packSearchInput').value.trim();
+async function searchPacks(auto) {
+  let q = $('packSearchInput').value.trim();
   const type = $('packTypeSelect').value;
-  if (!q) { toast('Enter a search term', 'info'); return; }
+  const prov = $('packProviderSelect').value;
+  if (!q) {
+    if (auto) { q = 'popular'; }
+    else { toast('Enter a search term', 'info'); return; }
+  }
   const container = $('packResults');
   container.innerHTML = '<div class="search-status">Searching...</div>';
-  const d = await get(`/api/packs/search?q=${encodeURIComponent(q)}&type=${type}`);
+  const d = await get(`/api/packs/search?q=${encodeURIComponent(q)}&type=${type}&provider=${prov}`);
   if (!d.ok || !d.results) { container.innerHTML = `<div class="search-status">${d.error||'No results'}</div>`; return; }
   if (!d.results.length) { container.innerHTML = '<div class="search-status">No results found</div>'; return; }
   let html = '<div class="pack-grid">';
   for (const r of d.results) {
     const icon = r.icon_url || '';
     const dl = r.downloads >= 1000 ? Math.floor(r.downloads/1000)+'k' : r.downloads;
+    const provLabel = r.provider === 'sourceforge' ? '<span style="color:#f90">SourceForge</span>' : '<span style="color:#5ced73">Modrinth</span>';
     html += `<div class="pack-card">
       <img src="${icon}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 48 48%22><rect fill=%22%23333%22 width=%2248%22 height=%2248%22/><text x=%2224%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2224%22>?</text></svg>'">
       <div class="pc-body">
@@ -487,9 +493,9 @@ async function searchPacks() {
         <div class="pc-meta">
           <span>${escapeHtml(r.author)}</span>
           <span>${dl} downloads</span>
-          <span>${r.latest_version||''}</span>
+          <span>${provLabel}</span>
         </div>
-        <button class="btn btn-cmd" style="padding:4px 12px;font-size:12px;margin-top:6px" onclick="showVersions('${r.id}','${escapeHtml(r.title)}','${type}')">Install</button>
+        <button class="btn btn-cmd" style="padding:4px 12px;font-size:12px;margin-top:6px" onclick="showVersions('${r.id}','${escapeHtml(r.title)}','${type}','${prov}')">Install</button>
       </div>
     </div>`;
   }
@@ -497,11 +503,13 @@ async function searchPacks() {
   container.innerHTML = html;
 }
 
-async function showVersions(projectId, title, packType) {
+async function showVersions(projectId, title, packType, provider) {
   $('versionModalTitle').textContent = `Versions — ${title}`;
   $('versionList').innerHTML = '<div class="search-status">Loading...</div>';
   $('versionModal').classList.add('show');
-  const d = await get(`/api/packs/versions?id=${projectId}`);
+  let url = `/api/packs/versions?id=${projectId}`;
+  if (provider) url += `&provider=${provider}`;
+  const d = await get(url);
   if (!d.ok || !d.versions) { $('versionList').innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
   if (!d.versions.length) { $('versionList').innerHTML = '<div class="search-status">No versions found</div>'; return; }
   let html = '<div style="max-height:300px;overflow-y:auto">';

@@ -16,7 +16,9 @@ from mc_helpers import (
 )
 from mc_server import start_minecraft, stop_minecraft, send_minecraft
 from mc_properties import PROPS_SCHEMA, save_props
-from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download, list_installed_packs
+from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download
+from mc_sourceforge import sourceforge_search as sf_search, sourceforge_versions as sf_versions
+from mc_modrinth import list_installed_packs
 
 
 def register_routes(app, html):
@@ -267,9 +269,12 @@ def register_routes(app, html):
         prov = request.args.get("provider", "modrinth")
         if not q:
             return fail("Search query required.")
-        if prov != "modrinth":
+        if prov == "modrinth":
+            results = modrinth_search(q, pt)
+        elif prov == "sourceforge":
+            results = sf_search(q, pt)
+        else:
             return fail(f"Unknown provider: {prov}")
-        results = modrinth_search(q, pt)
         if isinstance(results, dict) and "error" in results:
             return fail(results["error"])
         return ok({"results": results, "provider": prov, "type": pt})
@@ -277,9 +282,15 @@ def register_routes(app, html):
     @app.route("/api/packs/versions")
     def api_packs_versions():
         pid = request.args.get("id", "")
+        prov = request.args.get("provider", "modrinth")
         if not pid:
             return fail("Project ID required.")
-        versions = modrinth_versions(pid)
+        if prov == "modrinth":
+            versions = modrinth_versions(pid)
+        elif prov == "sourceforge":
+            versions = sf_versions(pid)
+        else:
+            versions = modrinth_versions(pid)
         if isinstance(versions, dict) and "error" in versions:
             return fail(versions["error"])
         return ok({"versions": versions})
