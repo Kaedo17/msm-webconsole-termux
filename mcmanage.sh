@@ -493,12 +493,10 @@ init_server() {
     $deps_ok && ok "Dependencies installed." || return 1
     echo
 
-    info "[2/5] Making script executable..."
+    info "[2/5] Making script executable and adding to PATH..."
     chmod +x "$0"
-    ok "Done."
+    link_to_path
     echo
-
-    info "[3/5] Downloading server jar..."
     install
     if [ $? -ne 0 ] || [ ! -f "$SERVER_DIR/$SERVER_JAR" ]; then
         err "Server jar download failed."
@@ -507,12 +505,12 @@ init_server() {
     ok "Server jar ready."
     echo
 
-    info "[4/5] Accepting EULA..."
+    info "[3/4] Accepting EULA..."
     echo 'eula=true' > "$SERVER_DIR/eula.txt"
     ok "EULA accepted."
     echo
 
-    info "[5/5] Starting server for the first time..."
+    info "[4/4] Starting server for the first time..."
     start_server
     if [ $? -ne 0 ]; then
         err "Server failed to start. Run '$0 console' manually after fixing."
@@ -533,31 +531,31 @@ link_to_path() {
     mkdir -p "$target_dir"
     local target="$target_dir/mcmanage"
 
-    if [ -f "$target" ] || [ -L "$target" ]; then
-        warn "mcmanage already exists in $target_dir."
-        read -p "Overwrite? [y/N] " -r
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            info "Cancelled."
-            return 0
-        fi
-        rm -f "$target"
-    fi
+    [ -f "$target" ] || [ -L "$target" ] && rm -f "$target"
 
     chmod +x "$0"
     local abs_path; abs_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     ln -sf "$abs_path" "$target"
 
-    if [ -f "$target" ] || [ -L "$target" ]; then
-        ok "Linked: $0 -> $target"
-    else
+    if ! [ -f "$target" ] && ! [ -L "$target" ]; then
         err "Symlink creation failed."
         return 1
     fi
+    ok "Linked: $0 -> $target"
 
+    # Auto-add to PATH in .bashrc
+    local bashrc="$HOME/.bashrc"
+    local line='export PATH="$HOME/.local/bin:$PATH"'
     if [[ ":$PATH:" != *":$target_dir:"* ]]; then
-        warn "$target_dir is not in PATH."
-        warn "Add this to your ~/.bashrc:"
-        printf '  export PATH="$HOME/.local/bin:$PATH"\n'
+        if ! grep -qF "$line" "$bashrc" 2>/dev/null; then
+            echo "" >> "$bashrc"
+            echo "# mcmanage" >> "$bashrc"
+            echo "$line" >> "$bashrc"
+            ok "Added ~/.local/bin to PATH in ~/.bashrc"
+        fi
+        # Source it for the current session
+        export PATH="$HOME/.local/bin:$PATH"
+        ok "Run 'mcmanage' from anywhere (restart Termux or source ~/.bashrc to make permanent)"
     else
         ok "Now run 'mcmanage' from anywhere!"
     fi
