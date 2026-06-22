@@ -358,8 +358,7 @@ def api_backup_restore():
 
 # ── HTML ──────────────────────────────────────────────────────────────
 
-HTML = """\
-<!DOCTYPE html>
+HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -476,7 +475,7 @@ HTML = """\
       </div>
       <div class="console-wrap">
         <div class="console-header"><span>Server Console</span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="clearConsole()">Clear</button></div>
-        <div class="console" id="consoleOutput"></div>
+        <div class="console" id="consoleOutput"><span style="color:#555">Server not running — start it to see console output</span></div>
         <form class="cmd-bar" onsubmit="return sendCmd(event)">
           <input type="text" id="cmdInput" placeholder="Type a command..." autocomplete="off">
           <button class="btn btn-cmd" type="submit">Send</button>
@@ -635,13 +634,17 @@ function setupConsole() {
     if (lineCount > 0 && d.lines.length <= lineCount) return;
     const newLines = lineCount === 0 ? d.lines : d.lines.slice(lineCount);
     lineCount = d.lines.length;
+    // Clear placeholder on first real output
+    if (d.lines.length > 0 && out.children.length === 1 && out.children[0].textContent.includes('not running')) {
+      out.innerHTML = '';
+    }
     for (const line of newLines) {
       const div = document.createElement('div');
       let cls = '';
       let text = line;
       // Strip Minecraft color codes
-      text = text.replace(/\\xa7[0-9a-fklmnor]/g, '');
-      text = text.replace(/\\u00a7[0-9a-fklmnor]/g, '');
+      text = text.replace(/\xa7[0-9a-fklmnor]/g, '');
+      text = text.replace(/\u00a7[0-9a-fklmnor]/g, '');
       // Color by log level
       if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
       if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
@@ -664,7 +667,7 @@ function setupConsole() {
 }
 
 function clearConsole() {
-  $('consoleOutput').innerHTML = '';
+  $('consoleOutput').innerHTML = '<span style="color:#555">Server not running — start it to see console output</span>';
 }
 
 function sendCmd(e) {
