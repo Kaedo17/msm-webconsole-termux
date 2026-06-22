@@ -583,12 +583,14 @@ update_self() {
     else
         info "Downloading latest from GitHub..."
         local target="$HOME/.local/bin/mcmanage"
-        local web_py="$HOME/.local/bin/webconsole.py"
+        local web_dir="$HOME/.local/bin"
         local repo="https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main"
         curl -sSfLo "$target" "$repo/mcmanage.sh" || { err "Download failed."; return 1; }
-        curl -sSfLo "$web_py" "$repo/webconsole.py" || { err "Download failed."; return 1; }
+        for mod in webconsole.py mc_state.py mc_helpers.py mc_properties.py mc_modrinth.py mc_server.py mc_routes.py; do
+            curl -sSfLo "$web_dir/$mod" "$repo/$mod" || { err "Failed to download $mod"; return 1; }
+        done
         chmod +x "$target"
-        ok "Updated mcmanage.sh and webconsole.py"
+        ok "Updated mcmanage.sh and all web modules"
     fi
     ok "Update complete!"
 }

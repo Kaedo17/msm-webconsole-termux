@@ -39,15 +39,21 @@ pkg install openjdk-17 screen curl python -y
 echo "[3/5] Installing Flask for web UI..."
 pip install flask 2>/dev/null || python3 -m pip install flask 2>/dev/null
 
-echo "[4/5] Installing mcmanage.sh + webconsole.py..."
+echo "[4/5] Installing mcmanage.sh + webconsole.py + modules..."
 
+MODULES="mc_state.py mc_helpers.py mc_properties.py mc_modrinth.py mc_server.py mc_routes.py"
 INSTALL_OK=false
 
 # Try local files
 if [ -f "$THIS_DIR/mcmanage.sh" ] && [ -f "$THIS_DIR/webconsole.py" ]; then
     echo "   Copying local files from $THIS_DIR ..."
-    cat "$THIS_DIR/mcmanage.sh" > "$INSTALL_DIR/mcmanage" && \
-    cat "$THIS_DIR/webconsole.py" > "$INSTALL_DIR/webconsole.py" && \
+    cat "$THIS_DIR/mcmanage.sh" > "$INSTALL_DIR/mcmanage" || INSTALL_OK=false
+    cat "$THIS_DIR/webconsole.py" > "$INSTALL_DIR/webconsole.py" || INSTALL_OK=false
+    for mod in $MODULES; do
+        if [ -f "$THIS_DIR/$mod" ]; then
+            cat "$THIS_DIR/$mod" > "$INSTALL_DIR/$mod" || INSTALL_OK=false
+        fi
+    done
     INSTALL_OK=true
 fi
 
@@ -56,10 +62,14 @@ if ! $INSTALL_OK; then
     echo "   Downloading from GitHub..."
     for i in 1 2 3; do
         echo "   Attempt $i/3..."
-        curl -sSfLo "$INSTALL_DIR/mcmanage" "$REPO_URL/mcmanage.sh" 2>/dev/null && \
-        curl -sSfLo "$INSTALL_DIR/webconsole.py" "$REPO_URL/webconsole.py" 2>/dev/null && \
-        INSTALL_OK=true && break
-        [ $i -lt 3 ] && sleep 2
+        INSTALL_OK=true
+        curl -sSfLo "$INSTALL_DIR/mcmanage" "$REPO_URL/mcmanage.sh" 2>/dev/null || INSTALL_OK=false
+        curl -sSfLo "$INSTALL_DIR/webconsole.py" "$REPO_URL/webconsole.py" 2>/dev/null || INSTALL_OK=false
+        for mod in $MODULES; do
+            curl -sSfLo "$INSTALL_DIR/$mod" "$REPO_URL/$mod" 2>/dev/null || INSTALL_OK=false
+        done
+        $INSTALL_OK && break
+        sleep 2
     done
 fi
 
