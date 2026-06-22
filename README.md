@@ -1,121 +1,97 @@
 # mcmanage — Minecraft Java Server Manager for Termux
 
-Run a full Minecraft Java server on your Android phone via Termux.
+Run a full Minecraft Java server on your Android phone via Termux, with a web dashboard.
 
 ## Features
 
 - **One-command setup** — installs everything and starts the server
 - **Web Dashboard** — manage via browser at `http://localhost:5000`
-- **Full lifecycle** — start/stop/restart with graceful shutdown
-- **Screen console** — attach/detach server terminal
-- **World backups** — auto-prunes old backups
-- **Logs** — tail live or view recent output
+- **Start / Stop / Restart** with graceful player countdown
+- **Live console** — see output + send commands from browser or terminal
 - **File Manager** — edit server.properties, eula.txt from browser
+- **World backups** — create & restore with auto-prune
 - **Optimize** — applies performance tweaks for Android
-- **Service** - termux-services integration
-- **PATH access** — symlink to run from anywhere
+- **PATH access** — run `mcmanage` from anywhere
 
-## Requirements
+## Install
 
-- [Termux](https://f-droid.org/repo/com.termux.fdroid.apk) (F-Droid version recommended)
-- Storage permission: `termux-setup-storage`
-- ~2.5 GB free space (server + world)
-
-## Quick Install
-
-Download both files alongside each other, then run:
+### Option A — One-liner
 
 ```bash
-chmod +x mcmanage.sh
-./mcmanage.sh init
+curl -sL https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main/install.sh | bash
 ```
 
-This installs dependencies, downloads the server jar, accepts EULA, starts the server, and opens the console.
+### Option B — Manual (files already on your device)
 
-## Manual Setup
+Copy `mcmanage.sh`, `webconsole.py`, and `install.sh` to Termux, then:
 
 ```bash
-pkg update && pkg upgrade -y
-pkg install openjdk-17 screen curl python -y
-chmod +x mcmanage.sh
-echo 'eula=true' > eula.txt
-./mcmanage.sh start
-./mcmanage.sh console   # Ctrl+A then D to detach
+chmod +x install.sh
+./install.sh
 ```
 
-## Add to PATH
+The installer will:
+1. Install openjdk-17, screen, curl, python
+2. Install Flask (for web UI)
+3. Copy scripts to `~/.local/bin/mcmanage` and `~/.local/bin/webconsole.py`
+4. Check that `~/.local/bin` is in PATH
+
+## Usage
 
 ```bash
-./mcmanage.sh link
+# Full setup — install deps, download server jar, accept EULA, start, console
+mcmanage init
+
+# Web dashboard (open http://localhost:5000 in browser)
+mcmanage web
+
+# Manual control
+mcmanage start
+mcmanage stop 15
+mcmanage restart
+mcmanage console        # Ctrl+A then D to detach
+mcmanage cmd "say hello"
+
+# Server info
+mcmanage status
+mcmanage logs 50
+mcmanage watch
+
+# Backups
+mcmanage backup
+mcmanage backups
+
+# Files
+mcmanage props          # edit server.properties
+mcmanage optimize       # apply tweaks
 ```
-
-Then use `mcmanage` from any directory.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `init` | Full setup: install deps, download jar, accept EULA, start & console |
-| `link` | Symlink to `~/.local/bin/mcmanage` for global access |
-| `start` | Start the server in a screen session |
-| `stop [sec]` | Graceful stop with countdown (default 30s) |
-| `restart [sec]` | Restart with optional shutdown warning |
-| `console` | Attach to server console (Ctrl+A D to detach) |
-| `cmd <cmd>` | Send a command (e.g. `cmd say hi`, `cmd whitelist add Steve`) |
-| `status` | Show PID, memory usage, and uptime |
-| `backup` | Backup all world directories |
-| `backups` | List available backups |
-| `restore <file>` | Restore world from a backup archive |
-| `logs [n]` | Show last N log lines (default 50) |
-| `watch` | Follow logs in real-time |
-| `props` | Edit `server.properties` |
-| `optimize` | Apply Android-friendly performance tweaks |
-| `install` | Download Paper / Purpur / Vanilla server jar |
-| `web` | Launch web dashboard (Python Flask UI) |
-| `service` | Create a termux-services entry for autostart |
-| `help` | Show usage info |
-
-## Configuration
-
-Set via environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SERVER_DIR` | script directory | Server folder |
-| `SERVER_JAR` | `server.jar` | Jar filename |
-| `MAX_RAM` | `2G` | Max heap size |
-| `MAX_BACKUPS` | `7` | Backups to retain |
-| `LOG_FILE` | `$SERVER_DIR/server.log` | Log file path |
 
 ## Web Dashboard
 
-A full browser-based management UI (`webconsole.py`) is included alongside `mcmanage.sh`.
+Open `http://localhost:5000` after running `mcmanage web`.
+
+- Start / Stop / Restart the server
+- Live console log with command input
+- File browser and editor (server.properties, eula.txt, etc.)
+- One-click world backups
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_DIR` | current directory | Server folder |
+| `SERVER_JAR` | `server.jar` | Jar filename |
+| `MAX_RAM` | `2G` | Max heap size |
+| `MAX_BACKUPS` | `7` | Backups to keep |
+| `LOG_FILE` | `$SERVER_DIR/server.log` | Log path |
 
 ```bash
-./mcmanage.sh web
-# or directly:
-python3 webconsole.py --dir /path/to/server --port 5000
-```
-
-Open `http://localhost:5000` in your browser to:
-
-- **Start / Stop / Restart** the server
-- **Live console** — see output in real-time, send commands
-- **File Manager** — browse and edit server files (server.properties, etc.)
-- **Backups** — create and restore world backups from the browser
-- **Dashboard** — view memory, uptime, player count
-
-Flask is auto-installed on first run via `pip`.
-
-Example:
-
-```bash
-MAX_RAM=3G ./mcmanage.sh start
+MAX_RAM=3G mcmanage start
 ```
 
 ## Tips
 
 - **Detach from console:** `Ctrl+A` then `D`
 - **Increase RAM:** Set `MAX_RAM=4G` if your device has enough memory
-- **Port forwarding:** Use `termux-wake-lock` to keep the server alive in background; forward port 25565 in your router
-- **Auto-start:** `./mcmanage.sh service` sets up a termux-service
+- **Keep alive:** Use `termux-wake-lock` to keep the server running in background
+- **Auto-start:** `mcmanage service` sets up termux-services
