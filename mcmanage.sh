@@ -479,6 +479,90 @@ RUNEOT
     info "Status: sv status $svc_name"
 }
 
+init_server() {
+    info "Starting full server setup..."
+    echo
+
+    info "[1/5] Installing dependencies (openjdk-17, screen, curl)..."
+    pkg update -y
+    pkg install openjdk-17 screen curl -y
+    local deps_ok=true
+    command -v java &>/dev/null || { err "Java install failed."; deps_ok=false; }
+    command -v screen &>/dev/null || { err "Screen install failed."; deps_ok=false; }
+    command -v curl &>/dev/null || { err "Curl install failed."; deps_ok=false; }
+    $deps_ok && ok "Dependencies installed." || return 1
+    echo
+
+    info "[2/5] Making script executable..."
+    chmod +x "$0"
+    ok "Done."
+    echo
+
+    info "[3/5] Downloading server jar..."
+    install
+    if [ $? -ne 0 ] || [ ! -f "$SERVER_DIR/$SERVER_JAR" ]; then
+        err "Server jar download failed."
+        return 1
+    fi
+    ok "Server jar ready."
+    echo
+
+    info "[4/5] Accepting EULA..."
+    echo 'eula=true' > "$SERVER_DIR/eula.txt"
+    ok "EULA accepted."
+    echo
+
+    info "[5/5] Starting server for the first time..."
+    start_server
+    if [ $? -ne 0 ]; then
+        err "Server failed to start. Run '$0 console' manually after fixing."
+        return 1
+    fi
+
+    echo
+    ok "========================================"
+    ok "  Setup complete! Attaching to console..."
+    ok "  Detach with Ctrl+A then D"
+    ok "========================================"
+    sleep 2
+    console
+}
+
+link_to_path() {
+    local target_dir="$HOME/.local/bin"
+    mkdir -p "$target_dir"
+    local target="$target_dir/mcmanage"
+
+    if [ -f "$target" ] || [ -L "$target" ]; then
+        warn "mcmanage already exists in $target_dir."
+        read -p "Overwrite? [y/N] " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Cancelled."
+            return 0
+        fi
+        rm -f "$target"
+    fi
+
+    chmod +x "$0"
+    local abs_path; abs_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    ln -sf "$abs_path" "$target"
+
+    if [ -f "$target" ] || [ -L "$target" ]; then
+        ok "Linked: $0 -> $target"
+    else
+        err "Symlink creation failed."
+        return 1
+    fi
+
+    if [[ ":$PATH:" != *":$target_dir:"* ]]; then
+        warn "$target_dir is not in PATH."
+        warn "Add this to your ~/.bashrc:"
+        printf '  export PATH="$HOME/.local/bin:$PATH"\n'
+    else
+        ok "Now run 'mcmanage' from anywhere!"
+    fi
+}
+
 usage() {
     cat <<EOF
 \e[36mMinecraft Server Manager for Termux\e[0m
@@ -487,6 +571,8 @@ usage() {
   $0 \e[36m<command>\e[0m [options]
 
 \e[33mCommands:\e[0m
+  init               Full setup: install deps, download jar, accept EULA, start & console
+  link               Symlink this script to ~/.local/bin/mcmanage (PATH access)
   start              Start the server
   stop [sec]         Stop server (default 30s warning)
   restart [sec]      Restart server
@@ -504,13 +590,17 @@ usage() {
   service            Create a termux-services entry
   help               Show this help
 
+\e[33mQuick start:\e[0m
+  \$0 init       # one-command setup (install deps, jar, accept EULA, start)
+  \$0 link       # add to PATH: run 'mcmanage' from anywhere
+
 \e[33mExamples:\e[0m
-  $0 start
-  $0 stop 15
-  $0 cmd "say Hello everyone!"
-  $0 cmd "whitelist add Steve"
-  $0 logs 100
-  $0 backup
+  \$0 start
+  \$0 stop 15
+  \$0 cmd "say Hello everyone!"
+  \$0 cmd "whitelist add Steve"
+  \$0 logs 100
+  \$0 backup
 
 \e[33mConfiguration:\e[0m
   Configure via environment variables or edit the script:
@@ -521,12 +611,12 @@ usage() {
   MAX_BACKUPS        Max backups to keep (default: 7)
   LOG_FILE           Path to log file   (default: \$SERVER_DIR/server.log)
 
-\e[33mSetup:\e[0m
-  1. pkg install openjdk-17 screen curl
-  2. \$0 install   (downloads Paper server jar)
-  3. echo 'eula=true' > \$(pwd)/eula.txt
-  4. \$0 start
-  5. \$0 console   (Ctrl+A then D to detach)
+\e[33mManual setup steps:\e[0m
+  pkg install openjdk-17 screen curl
+  chmod +x \$0
+  echo 'eula=true' > eula.txt
+  \$0 start
+  \$0 console   (Ctrl+A then D to detach)
 EOF
 }
 
@@ -545,6 +635,8 @@ case "${1:-help}" in
     props)     edit_properties ;;
     optimize)  optimize ;;
     install)   install ;;
+    init)      init_server ;;
+    link)      link_to_path ;;
     service)   setup_service ;;
     help|*)    usage ;;
 esac
