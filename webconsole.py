@@ -17,12 +17,12 @@ import sys
 from pathlib import Path
 
 try:
-    from flask import Flask
+    from flask import Flask  # type: ignore
 except ImportError:
     import subprocess
     print("Installing Flask...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
-    from flask import Flask
+    from flask import Flask  # type: ignore
 
 import mc_state
 from mc_state import load_config

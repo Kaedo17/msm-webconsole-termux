@@ -8,7 +8,7 @@ when ``mc_server`` reassigns ``server_proc``, ``console_history``, etc.
 import subprocess
 from pathlib import Path
 
-from flask import jsonify, request
+from flask import jsonify, request  # type: ignore
 
 import mc_state
 

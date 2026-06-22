@@ -6,7 +6,7 @@ import tarfile
 import time
 from datetime import datetime
 
-from flask import request, Response
+from flask import request, Response  # type: ignore
 
 from webconsole import app, HTML
 
