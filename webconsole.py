@@ -5,7 +5,6 @@ Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
 """
 
 import argparse
-import io
 import json
 import os
 import re
@@ -18,7 +17,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,7 +27,10 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
     from flask import Flask, jsonify, request, Response
 
-# ── Config ────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  CONFIG & STATE
+# ═══════════════════════════════════════════════════════════════════════
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SERVER_DIR = Path(os.environ.get("SERVER_DIR", SCRIPT_DIR))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -37,50 +38,114 @@ PORT = int(os.environ.get("PORT", 5000))
 JAVA_BIN = shutil.which("java") or "java"
 JAR_NAME = os.environ.get("SERVER_JAR", "server.jar")
 
-# ── Globals ───────────────────────────────────────────────────────────
 app = Flask(__name__)
 server_proc = None
 console_history = []
 status_cache = {"online": False, "players": [], "tps": 0, "uptime": 0, "mem_mb": 0, "started_at": ""}
 _status_lock = threading.Lock()
 CONSOLE_MAX = 500
-CONFIG_FILE = None  # set after SERVER_DIR is finalized
+
 MIN_RAM = os.environ.get("MIN_RAM", "512M")
 MAX_RAM = os.environ.get("MAX_RAM", "2G")
 
 # ── Config persistence ───────────────────────────────────────────────
 
-def config_path():
+def _config_path():
     return SERVER_DIR / ".webconsole.json"
 
 def load_config():
     global MIN_RAM, MAX_RAM
-    cf = config_path()
-    if cf.exists():
-        try:
-            d = json.loads(cf.read_text())
-            MIN_RAM = d.get("min_ram", MIN_RAM)
-            MAX_RAM = d.get("max_ram", MAX_RAM)
-        except Exception:
-            pass
-
-def save_config():
-    cf = config_path()
+    path = _config_path()
+    if not path.exists():
+        return
     try:
-        d = {"min_ram": MIN_RAM, "max_ram": MAX_RAM}
-        if cf.exists():
-            try:
-                old = json.loads(cf.read_text())
-                d.update(old)
-            except Exception:
-                pass
-        d["min_ram"] = MIN_RAM
-        d["max_ram"] = MAX_RAM
-        cf.write_text(json.dumps(d, indent=2))
+        data = json.loads(path.read_text())
+        MIN_RAM = data.get("min_ram", MIN_RAM)
+        MAX_RAM = data.get("max_ram", MAX_RAM)
     except Exception:
         pass
 
-# ── Server properties schema ─────────────────────────────────────────
+def save_config():
+    path = _config_path()
+    try:
+        existing = {}
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text())
+            except Exception:
+                pass
+        existing["min_ram"] = MIN_RAM
+        existing["max_ram"] = MAX_RAM
+        path.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+
+# ═══════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ═══════════════════════════════════════════════════════════════════════
+
+def ok(data):
+    return jsonify({"ok": True, **data})
+
+def fail(msg, code=400):
+    return jsonify({"ok": False, "error": msg}), code
+
+def is_running():
+    return server_proc is not None and server_proc.poll() is None
+
+def safe_resolve(path_str):
+    target = (SERVER_DIR / path_str).resolve()
+    if not str(target).startswith(str(SERVER_DIR.resolve())):
+        return None
+    return target
+
+def find_jar():
+    jar = SERVER_DIR / JAR_NAME
+    if jar.exists():
+        return jar
+    for f in sorted(SERVER_DIR.glob("*.jar")):
+        return f
+    return None
+
+def check_eula():
+    eula = SERVER_DIR / "eula.txt"
+    if not eula.exists():
+        eula.write_text("eula=false\n")
+        return False
+    return "eula=true" in eula.read_text().strip()
+
+def get_props():
+    pf = SERVER_DIR / "server.properties"
+    if not pf.exists():
+        return {}
+    props = {}
+    for line in pf.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            props[k.strip()] = v.strip()
+    return props
+
+def get_proc_mem(pid):
+    try:
+        out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)], text=True).strip()
+        return round(int(out) / 1024, 1) if out else 0
+    except Exception:
+        return 0
+
+def get_uptime(pid):
+    try:
+        out = subprocess.check_output(["ps", "-o", "etime=", "-p", str(pid)], text=True).strip()
+        return out
+    except Exception:
+        return ""
+
+def parse_json_body():
+    return request.get_json(silent=True) or {}
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SERVER PROPERTIES SCHEMA
+# ═══════════════════════════════════════════════════════════════════════
 
 PROPS_SCHEMA = {
     "online-mode":           {"type": "bool",   "cat": "server",   "label": "Online Mode",       "desc": "Authenticate players with Mojang"},
@@ -137,60 +202,54 @@ def save_props(changes):
     pf.write_text("".join(lines), encoding="utf-8")
     return True, "Properties saved"
 
-# ── Modrinth helpers ──────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  MODRINTH INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════
 
 MODRINTH_API = "https://api.modrinth.com/v2"
+UA = "mcmanage-termux/1.0"
+
+def _modrinth_get(url, timeout=15):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    res = urllib.request.urlopen(req, timeout=timeout)
+    return json.loads(res.read())
 
 def modrinth_search(query, project_type="modpack", limit=20):
-    url = f"{MODRINTH_API}/search?query={urllib.parse.quote(query)}&facets={urllib.parse.quote(json.dumps([[f'project_type:{project_type}']]))}&limit={limit}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "mcmanage-termux/1.0"})
-        res = urllib.request.urlopen(req, timeout=15)
-        data = json.loads(res.read())
-        hits = []
-        for h in data.get("hits", []):
-            hits.append({
-                "id": h["project_id"],
-                "title": h["title"],
-                "description": h.get("description", ""),
-                "icon_url": h.get("icon_url", ""),
-                "author": h.get("author", ""),
-                "downloads": h.get("downloads", 0),
-                "slug": h.get("slug", ""),
-                "latest_version": h.get("latest_version", ""),
-                "project_type": h.get("project_type", project_type),
-            })
-        return hits
+        url = f"{MODRINTH_API}/search?query={urllib.parse.quote(query)}&facets={urllib.parse.quote(json.dumps([[f'project_type:{project_type}']]))}&limit={limit}"
+        data = _modrinth_get(url)
+        return [{
+            "id": h["project_id"],
+            "title": h["title"],
+            "description": h.get("description", ""),
+            "icon_url": h.get("icon_url", ""),
+            "author": h.get("author", ""),
+            "downloads": h.get("downloads", 0),
+            "slug": h.get("slug", ""),
+            "latest_version": h.get("latest_version", ""),
+            "project_type": h.get("project_type", project_type),
+        } for h in data.get("hits", [])]
     except Exception as e:
         return {"error": str(e)}
 
 def modrinth_versions(project_id):
-    url = f"{MODRINTH_API}/project/{project_id}/version"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "mcmanage-termux/1.0"})
-        res = urllib.request.urlopen(req, timeout=15)
-        data = json.loads(res.read())
-        versions = []
-        for v in data:
-            versions.append({
-                "id": v["id"],
-                "name": v["name"],
-                "version_number": v["version_number"],
-                "game_versions": v.get("game_versions", []),
-                "loaders": v.get("loaders", []),
-                "files": [{
-                    "url": f["url"],
-                    "filename": f["filename"],
-                    "size": f["size"],
-                } for f in v.get("files", [])],
-                "date": v.get("date_published", ""),
-            })
-        return versions
+        url = f"{MODRINTH_API}/project/{project_id}/version"
+        data = _modrinth_get(url)
+        return [{
+            "id": v["id"],
+            "name": v["name"],
+            "version_number": v["version_number"],
+            "game_versions": v.get("game_versions", []),
+            "loaders": v.get("loaders", []),
+            "files": [{"url": f["url"], "filename": f["filename"], "size": f["size"]} for f in v.get("files", [])],
+            "date": v.get("date_published", ""),
+        } for v in data]
     except Exception as e:
         return {"error": str(e)}
 
 def modrinth_download(file_url, dest_path):
-    req = urllib.request.Request(file_url, headers={"User-Agent": "mcmanage-termux/1.0"})
+    req = urllib.request.Request(file_url, headers={"User-Agent": UA})
     res = urllib.request.urlopen(req, timeout=60)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(dest_path, "wb") as f:
@@ -202,10 +261,9 @@ def modrinth_download(file_url, dest_path):
     return dest_path
 
 def list_installed_packs():
-    mods_dir = SERVER_DIR / "mods"
-    rp_dir = SERVER_DIR / "resourcepacks"
     result = []
-    for d, pack_type in [(mods_dir, "mod"), (rp_dir, "resourcepack")]:
+    for sub, pack_type in [("mods", "mod"), ("resourcepacks", "resourcepack")]:
+        d = SERVER_DIR / sub
         if d.exists():
             for f in sorted(d.iterdir()):
                 if f.suffix in (".jar", ".zip"):
@@ -217,58 +275,9 @@ def list_installed_packs():
                     })
     return result
 
-# ── Helpers ───────────────────────────────────────────────────────────
-
-def ok(data):
-    return jsonify({"ok": True, **data})
-
-def fail(msg, code=400):
-    return jsonify({"ok": False, "error": msg}), code
-
-def find_jar():
-    jar = SERVER_DIR / JAR_NAME
-    if jar.exists():
-        return jar
-    for f in sorted(SERVER_DIR.glob("*.jar")):
-        return f
-    return None
-
-def check_eula():
-    eula = SERVER_DIR / "eula.txt"
-    if not eula.exists():
-        eula.write_text("eula=false\n")
-        return False
-    return "eula=true" in eula.read_text().strip()
-
-def get_props():
-    pf = SERVER_DIR / "server.properties"
-    if not pf.exists():
-        return {}
-    props = {}
-    for line in pf.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, _, v = line.partition("=")
-            props[k.strip()] = v.strip()
-    return props
-
-def get_proc_mem(pid):
-    try:
-        out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)], text=True).strip()
-        if out:
-            return round(int(out) / 1024, 1)
-    except Exception:
-        pass
-    return 0
-
-def get_uptime(pid):
-    try:
-        out = subprocess.check_output(["ps", "-o", "etime=", "-p", str(pid)], text=True).strip()
-        return out
-    except Exception:
-        return ""
-
-# ── Server Process ────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  SERVER PROCESS MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════
 
 def server_reader(proc):
     global console_history
@@ -280,7 +289,6 @@ def server_reader(proc):
             console_history.append(line)
             if len(console_history) > CONSOLE_MAX:
                 console_history.pop(0)
-            # Parse player list from log
             if "]:" in line and "joined the game" in line:
                 with _status_lock:
                     name = line.split("]:")[-1].strip().split(" ")[0].strip()
@@ -298,7 +306,7 @@ def poll_status():
     global status_cache
     while True:
         with _status_lock:
-            running = server_proc is not None and server_proc.poll() is None
+            running = is_running()
             status_cache["online"] = running
             if running and server_proc:
                 pid = server_proc.pid
@@ -314,29 +322,36 @@ threading.Thread(target=poll_status, daemon=True).start()
 
 def start_minecraft():
     global server_proc
-    if server_proc and server_proc.poll() is None:
+    if is_running():
         return False, "Server already running."
     jar = find_jar()
     if not jar:
         return False, "No server jar found."
     if not check_eula():
         return False, "EULA not accepted. Edit eula.txt and set eula=true."
-    # Generate server.properties on first run
+
     env = os.environ.copy()
     env["TERM"] = "dumb"
+
     if not (SERVER_DIR / "server.properties").exists():
-        subprocess.run([str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"],
-                       cwd=str(SERVER_DIR), capture_output=True, timeout=20, env=env)
-    java_cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}", "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
-    # Use script to create a PTY (fixes stdout buffering and JLine issues on Termux)
+        subprocess.run(
+            [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}",
+             "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"],
+            cwd=str(SERVER_DIR), capture_output=True, timeout=20, env=env)
+
+    java_cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}",
+                "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
+
     script_bin = shutil.which("script")
     if script_bin:
         cmd_str = shlex.join(java_cmd) if hasattr(shlex, 'join') else " ".join(shlex.quote(x) for x in java_cmd)
         cmd = [script_bin, "-q", "-c", cmd_str, "/dev/null"]
     else:
         cmd = java_cmd
-    proc = subprocess.Popen(cmd, cwd=str(SERVER_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            stdin=subprocess.PIPE, text=True, bufsize=1, env=env)
+
+    proc = subprocess.Popen(cmd, cwd=str(SERVER_DIR), stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, stdin=subprocess.PIPE,
+                            text=True, bufsize=1, env=env)
     server_proc = proc
     threading.Thread(target=server_reader, args=(proc,), daemon=True).start()
     with _status_lock:
@@ -346,10 +361,9 @@ def start_minecraft():
 
 def stop_minecraft(seconds=15):
     global server_proc
-    if not server_proc or server_proc.poll() is not None:
+    if not is_running():
         return False, "Server not running."
     proc = server_proc
-    # Countdown messages
     for i in range(seconds, 0, -5):
         try:
             proc.stdin.write(f"say §cServer shutdown in {i}s...\n")
@@ -373,7 +387,7 @@ def stop_minecraft(seconds=15):
     return True, "Server stopped."
 
 def send_minecraft(cmd):
-    if not server_proc or server_proc.poll() is not None:
+    if not is_running():
         return False, "Server not running."
     try:
         server_proc.stdin.write(cmd + "\n")
@@ -382,7 +396,9 @@ def send_minecraft(cmd):
     except Exception as e:
         return False, str(e)
 
-# ── Web Routes ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — Server lifecycle
+# ═══════════════════════════════════════════════════════════════════════
 
 @app.route("/")
 def index():
@@ -390,19 +406,15 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    players = []
-    online_count = 0
-    max_players = 20
     with _status_lock:
         players = list(status_cache["players"])
         online_count = len(players)
-        props = get_props()
-        max_players = int(props.get("max-players", 20))
+    props = get_props()
     return ok({
         "online": status_cache["online"],
         "players": players,
         "online_count": online_count,
-        "max_players": max_players,
+        "max_players": int(props.get("max-players", 20)),
         "mem_mb": status_cache["mem_mb"],
         "uptime": status_cache["uptime"],
         "started_at": status_cache["started_at"],
@@ -417,16 +429,14 @@ def api_ram():
     global MIN_RAM, MAX_RAM
     if request.method == "GET":
         return ok({"min_ram": MIN_RAM, "max_ram": MAX_RAM})
-    data = request.get_json(silent=True) or {}
+    data = parse_json_body()
     new_min = data.get("min_ram", "").strip().upper()
     new_max = data.get("max_ram", "").strip().upper()
-    valid = re.compile(r"^\d+[MG]$")
-    if not valid.match(new_min) or not valid.match(new_max):
+    if not re.match(r"^\d+[MG]$", new_min) or not re.match(r"^\d+[MG]$", new_max):
         return fail("Invalid RAM format. Use e.g. 512M, 1G, 2G, 4G")
-    if server_proc and server_proc.poll() is None:
+    if is_running():
         return fail("Stop the server before changing RAM.")
-    MIN_RAM = new_min
-    MAX_RAM = new_max
+    MIN_RAM, MAX_RAM = new_min, new_max
     save_config()
     return ok({"message": f"RAM set to {MIN_RAM} min / {MAX_RAM} max", "min_ram": MIN_RAM, "max_ram": MAX_RAM})
 
@@ -437,35 +447,36 @@ def api_start():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
-    data = request.get_json(silent=True) or {}
-    sec = int(data.get("seconds", 15))
-    ok_, msg = stop_minecraft(sec)
+    data = parse_json_body()
+    ok_, msg = stop_minecraft(int(data.get("seconds", 15)))
     return ok({"message": msg}) if ok_ else fail(msg)
 
 @app.route("/api/restart", methods=["POST"])
 def api_restart():
-    data = request.get_json(silent=True) or {}
-    sec = int(data.get("seconds", 15))
-    stop_minecraft(sec)
+    data = parse_json_body()
+    stop_minecraft(int(data.get("seconds", 15)))
     time.sleep(2)
     ok_, msg = start_minecraft()
     return ok({"message": msg}) if ok_ else fail(msg)
 
 @app.route("/api/command", methods=["POST"])
 def api_command():
-    data = request.get_json(silent=True) or {}
+    data = parse_json_body()
     cmd = data.get("command", "").strip()
     if not cmd:
         return fail("No command provided.")
     ok_, msg = send_minecraft(cmd)
     return ok({"message": msg}) if ok_ else fail(msg)
 
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — Console (SSE)
+# ═══════════════════════════════════════════════════════════════════════
+
 @app.route("/api/console")
 def api_console():
     def stream():
         last_len = 0
         while True:
-            # Send new lines since last check
             new_lines = console_history[last_len:]
             if new_lines:
                 last_len = len(console_history)
@@ -478,11 +489,15 @@ def api_console():
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
 
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — File manager
+# ═══════════════════════════════════════════════════════════════════════
+
 @app.route("/api/files")
 def api_files():
     path_str = request.args.get("path", "")
-    target = (SERVER_DIR / path_str).resolve()
-    if not str(target).startswith(str(SERVER_DIR.resolve())):
+    target = safe_resolve(path_str)
+    if target is None:
         return fail("Access denied.")
     if target.is_dir():
         items = []
@@ -505,25 +520,27 @@ def api_files():
 
 @app.route("/api/file/save", methods=["POST"])
 def api_file_save():
-    data = request.get_json(silent=True) or {}
-    path = data.get("path", "")
-    content = data.get("content", "")
-    target = (SERVER_DIR / path).resolve()
-    if not str(target).startswith(str(SERVER_DIR.resolve())):
+    data = parse_json_body()
+    target = safe_resolve(data.get("path", ""))
+    if target is None:
         return fail("Access denied.")
     try:
-        target.write_text(content, encoding="utf-8")
+        target.write_text(data.get("content", ""), encoding="utf-8")
         return ok({"message": "File saved."})
     except Exception as e:
         return fail(str(e))
 
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — Backups
+# ═══════════════════════════════════════════════════════════════════════
+
 @app.route("/api/backup", methods=["POST"])
 def api_backup():
-    worlds = [d for d in SERVER_DIR.iterdir() if d.is_dir() and ("world" in d.name.lower() or d.name.endswith("-world"))]
+    worlds = [d for d in SERVER_DIR.iterdir()
+              if d.is_dir() and ("world" in d.name.lower() or d.name.endswith("-world"))]
     if not worlds:
         return fail("No world directories found.")
-    # Save before backup
-    if server_proc and server_proc.poll() is None:
+    if is_running():
         try:
             server_proc.stdin.write("save-all\n")
             server_proc.stdin.flush()
@@ -556,48 +573,50 @@ def api_backups():
 
 @app.route("/api/backup/restore", methods=["POST"])
 def api_backup_restore():
-    data = request.get_json(silent=True) or {}
-    name = data.get("file", "")
-    archive = SERVER_DIR / "backups" / name
-    if not archive.exists():
+    data = parse_json_body()
+    archive = safe_resolve("backups/" + data.get("file", ""))
+    if archive is None or not archive.exists():
         return fail("Backup not found.")
-    if server_proc and server_proc.poll() is None:
+    if is_running():
         return fail("Stop the server before restoring a backup.")
     with tarfile.open(str(archive), "r:gz") as tar:
         tar.extractall(path=str(SERVER_DIR))
-    return ok({"message": f"Restored from {name}."})
+    return ok({"message": f"Restored from {data.get('file')}."})
 
-# ── Properties API ────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — Properties editor
+# ═══════════════════════════════════════════════════════════════════════
 
 @app.route("/api/properties", methods=["GET", "POST"])
 def api_properties():
     if request.method == "GET":
         props = get_props()
-        schema = PROPS_SCHEMA
         rich = {}
         for k, v in props.items():
-            entry = dict(schema.get(k, {"type": "string", "cat": "other", "label": k, "desc": ""}))
+            entry = dict(PROPS_SCHEMA.get(k, {"type": "string", "cat": "other", "label": k, "desc": ""}))
             entry["key"] = k
             entry["value"] = v
             rich[k] = entry
-        # Also include schema-only keys not yet in file
-        for k, s in schema.items():
+        for k, s in PROPS_SCHEMA.items():
             if k not in rich:
                 entry = dict(s)
                 entry["key"] = k
                 entry["value"] = s.get("default", "")
                 rich[k] = entry
         return ok({"properties": list(rich.values())})
-    data = request.get_json(silent=True) or {}
+
+    data = parse_json_body()
     changes = data.get("changes", {})
     if not changes:
         return fail("No changes provided.")
-    if server_proc and server_proc.poll() is None:
+    if is_running():
         return fail("Stop the server for some property changes to take effect, or restart after saving.")
     ok_, msg = save_props(changes)
     return ok({"message": msg}) if ok_ else fail(msg)
 
-# ── Modpacks / Resource Packs API ────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  WEB ROUTES — Modpacks / Resource Packs
+# ═══════════════════════════════════════════════════════════════════════
 
 @app.route("/api/packs/search")
 def api_packs_search():
@@ -606,12 +625,12 @@ def api_packs_search():
     prov = request.args.get("provider", "modrinth")
     if not q:
         return fail("Search query required.")
-    if prov == "modrinth":
-        results = modrinth_search(q, pt)
-        if isinstance(results, dict) and "error" in results:
-            return fail(results["error"])
-        return ok({"results": results, "provider": prov, "type": pt})
-    return fail(f"Unknown provider: {prov}")
+    if prov != "modrinth":
+        return fail(f"Unknown provider: {prov}")
+    results = modrinth_search(q, pt)
+    if isinstance(results, dict) and "error" in results:
+        return fail(results["error"])
+    return ok({"results": results, "provider": prov, "type": pt})
 
 @app.route("/api/packs/versions")
 def api_packs_versions():
@@ -625,16 +644,13 @@ def api_packs_versions():
 
 @app.route("/api/packs/install", methods=["POST"])
 def api_packs_install():
-    data = request.get_json(silent=True) or {}
+    data = parse_json_body()
     file_url = data.get("file_url", "")
     filename = data.get("filename", "pack.zip")
     pack_type = data.get("type", "modpack")
     if not file_url:
         return fail("No file URL provided.")
-    if pack_type == "resourcepack":
-        dest_dir = SERVER_DIR / "resourcepacks"
-    else:
-        dest_dir = SERVER_DIR / "mods"
+    dest_dir = SERVER_DIR / ("resourcepacks" if pack_type == "resourcepack" else "mods")
     dest = dest_dir / filename
     try:
         modrinth_download(file_url, dest)
@@ -648,12 +664,9 @@ def api_packs_installed():
 
 @app.route("/api/packs/remove", methods=["POST"])
 def api_packs_remove():
-    data = request.get_json(silent=True) or {}
-    path = data.get("path", "")
-    if not path:
-        return fail("No path provided.")
-    target = (SERVER_DIR / path).resolve()
-    if not str(target).startswith(str(SERVER_DIR.resolve())):
+    data = parse_json_body()
+    target = safe_resolve(data.get("path", ""))
+    if target is None:
         return fail("Access denied.")
     if not target.exists():
         return fail("File not found.")
