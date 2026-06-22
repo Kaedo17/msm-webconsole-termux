@@ -594,11 +594,9 @@ update_self() {
 }
 
 launch_web_ui() {
-    local script_dir
-    script_dir="$(cd "$(dirname "$0")" && pwd)"
-    local web_py="$script_dir/webconsole.py"
+    local web_py="$SCRIPT_DIR/webconsole.py"
     if [ ! -f "$web_py" ]; then
-        web_py="$SCRIPT_DIR/webconsole.py"
+        web_py="$HOME/.local/bin/webconsole.py"
     fi
     if [ ! -f "$web_py" ]; then
         err "webconsole.py not found alongside mcmanage.sh"

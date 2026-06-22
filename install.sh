@@ -5,6 +5,7 @@
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO_URL="https://raw.githubusercontent.com/Kaedo17/msm-webconsole-termux/main"
+THIS_DIR="$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")"
 
 echo "==> mcmanage — Minecraft Server Manager Installer"
 echo
@@ -14,18 +15,20 @@ if [ ! -d /data/data/com.termux ]; then
     exit 1
 fi
 
-# ── Resolve this script's real directory (handles symlinks) ──
-SCRIPT_FILE="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
-SCRIPT_DIR="$(dirname "$SCRIPT_FILE")"
+echo "  Source: $THIS_DIR"
+echo "  Target: $INSTALL_DIR"
+echo
 
-echo "   Installer dir: $SCRIPT_DIR"
-echo "   Target dir:    $INSTALL_DIR"
-
-# ── Clean old files (remove both files and broken symlinks) ──
-rm -f "$INSTALL_DIR/mcmanage" "$INSTALL_DIR/webconsole.py" 2>/dev/null
-# Also clean any directory with the same name (broken state from previous runs)
-[ -d "$INSTALL_DIR/mcmanage" ] && rm -rf "$INSTALL_DIR/mcmanage" 2>/dev/null
-[ -d "$INSTALL_DIR/webconsole.py" ] && rm -rf "$INSTALL_DIR/webconsole.py" 2>/dev/null
+# ── Clean destination thoroughly ──
+mkdir -p "$INSTALL_DIR"
+for name in mcmanage webconsole.py; do
+    target="$INSTALL_DIR/$name"
+    # Remove whatever is there: file, dir, broken symlink
+    rm -f "$target" 2>/dev/null
+    rm -rf "$target" 2>/dev/null
+    [ -L "$target" ] && unlink "$target" 2>/dev/null
+    [ -e "$target" ] && rm -rf "$target" 2>/dev/null
+done
 
 echo "[1/5] Updating packages..."
 pkg update -y
@@ -37,44 +40,40 @@ echo "[3/5] Installing Flask for web UI..."
 pip install flask 2>/dev/null || python3 -m pip install flask 2>/dev/null
 
 echo "[4/5] Installing mcmanage.sh + webconsole.py..."
-mkdir -p "$INSTALL_DIR"
 
-# Try local files first (if install.sh is in the repo directory)
-LOCAL_OK=false
-if [ -f "$SCRIPT_DIR/mcmanage.sh" ] && [ -f "$SCRIPT_DIR/webconsole.py" ]; then
-    echo "   Found local files in: $SCRIPT_DIR"
-    echo "   Copying..."
-    cp -f "$SCRIPT_DIR/mcmanage.sh" "$INSTALL_DIR/mcmanage" && \
-    cp -f "$SCRIPT_DIR/webconsole.py" "$INSTALL_DIR/webconsole.py" && \
-    LOCAL_OK=true
+INSTALL_OK=false
+
+# Try local files
+if [ -f "$THIS_DIR/mcmanage.sh" ] && [ -f "$THIS_DIR/webconsole.py" ]; then
+    echo "   Copying local files from $THIS_DIR ..."
+    cat "$THIS_DIR/mcmanage.sh" > "$INSTALL_DIR/mcmanage" && \
+    cat "$THIS_DIR/webconsole.py" > "$INSTALL_DIR/webconsole.py" && \
+    INSTALL_OK=true
 fi
 
-if ! $LOCAL_OK; then
+# Fallback to GitHub download
+if ! $INSTALL_OK; then
     echo "   Downloading from GitHub..."
-    DOWNLOAD_OK=false
     for i in 1 2 3; do
         echo "   Attempt $i/3..."
-        if curl -sSfLo "$INSTALL_DIR/mcmanage" "$REPO_URL/mcmanage.sh" 2>/dev/null &&
-           curl -sSfLo "$INSTALL_DIR/webconsole.py" "$REPO_URL/webconsole.py" 2>/dev/null; then
-            DOWNLOAD_OK=true
-            break
-        fi
+        curl -sSfLo "$INSTALL_DIR/mcmanage" "$REPO_URL/mcmanage.sh" 2>/dev/null && \
+        curl -sSfLo "$INSTALL_DIR/webconsole.py" "$REPO_URL/webconsole.py" 2>/dev/null && \
+        INSTALL_OK=true && break
         [ $i -lt 3 ] && sleep 2
     done
-    if ! $DOWNLOAD_OK; then
-        echo
-        echo "[!] Download from GitHub failed."
-        echo
-        echo "Try the git clone method instead:"
-        echo "  pkg install git"
-        echo "  git clone https://github.com/Kaedo17/msm-webconsole-termux"
-        echo "  cd msm-webconsole-termux"
-        echo "  ./install.sh"
-        echo
-        echo "Or download the ZIP from:"
-        echo "  https://github.com/Kaedo17/msm-webconsole-termux"
-        exit 1
-    fi
+fi
+
+if ! $INSTALL_OK; then
+    echo
+    echo "[!] Installation failed."
+    echo "    Could not copy local files or download from GitHub."
+    echo
+    echo "Try:"
+    echo "  pkg install git"
+    echo "  git clone https://github.com/Kaedo17/msm-webconsole-termux"
+    echo "  cd msm-webconsole-termux"
+    echo "  ./install.sh"
+    exit 1
 fi
 
 chmod +x "$INSTALL_DIR/mcmanage"
@@ -94,15 +93,15 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo "Adding $INSTALL_DIR to PATH in ~/.bashrc..."
     mkdir -p "$HOME"
     touch "$HOME/.bashrc"
-    if ! grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
-        echo >> "$HOME/.bashrc"
+    line='export PATH="$HOME/.local/bin:$PATH"'
+    if ! grep -qF "$line" "$HOME/.bashrc" 2>/dev/null; then
+        echo "" >> "$HOME/.bashrc"
         echo "# mcmanage" >> "$HOME/.bashrc"
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+        echo "$line" >> "$HOME/.bashrc"
         echo "[OK] Added to ~/.bashrc"
     fi
     export PATH="$HOME/.local/bin:$PATH"
-    echo "[OK] Now 'mcmanage' works in this session."
-    echo "    Run 'source ~/.bashrc' or restart Termux to make permanent."
+    echo "[OK] Run 'source ~/.bashrc' or restart Termux to make permanent."
 fi
 
 echo
@@ -116,9 +115,6 @@ echo "  mcmanage init"
 echo
 echo "Web dashboard:"
 echo "  mcmanage web"
-echo
-echo "Use existing server:"
-echo "  mcmanage --dir /path/to/your/server start"
 echo
 echo "Update:"
 echo "  cd msm-webconsole-termux && git pull && ./install.sh"
