@@ -41,7 +41,7 @@ pip install flask 2>/dev/null || python3 -m pip install flask 2>/dev/null
 
 echo "[4/5] Installing mcmanage.sh + webconsole.py + modules..."
 
-MODULES="mc_state.py mc_helpers.py mc_properties.py mc_modrinth.py mc_server.py mc_routes.py"
+MODULES="mc_state.py mc_helpers.py mc_properties.py mc_modrinth.py mc_server.py mc_routes.py mc_sourceforge.py"
 INSTALL_OK=false
 
 # Try local files
