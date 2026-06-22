@@ -2,678 +2,31 @@
 """
 webconsole.py — Minecraft Web Manager for Termux
 Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
+
+Modules:
+  mc_state.py     — shared state, config, constants
+  mc_helpers.py   — utility helpers
+  mc_properties.py — server.properties schema & editor
+  mc_modrinth.py  — Modrinth API integration
+  mc_server.py    — server process management
+  mc_routes.py    — all API route definitions
 """
 
 import argparse
-import json
-import os
-import re
-import shlex
-import shutil
-import subprocess
 import sys
-import tarfile
-import threading
-import time
-import urllib.parse
-import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    from flask import Flask, jsonify, request, Response
-except ImportError:
-    print("Installing Flask...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
-    from flask import Flask, jsonify, request, Response
+from flask import Flask
 
 # ═══════════════════════════════════════════════════════════════════════
-#  CONFIG & STATE
+#  Create Flask app — MUST come before route imports
 # ═══════════════════════════════════════════════════════════════════════
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-SERVER_DIR = Path(os.environ.get("SERVER_DIR", SCRIPT_DIR))
-HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", 5000))
-JAVA_BIN = shutil.which("java") or "java"
-JAR_NAME = os.environ.get("SERVER_JAR", "server.jar")
 
 app = Flask(__name__)
-server_proc = None
-console_history = []
-status_cache = {"online": False, "players": [], "tps": 0, "uptime": 0, "mem_mb": 0, "started_at": ""}
-_status_lock = threading.Lock()
-CONSOLE_MAX = 500
-
-MIN_RAM = os.environ.get("MIN_RAM", "512M")
-MAX_RAM = os.environ.get("MAX_RAM", "2G")
-
-# ── Config persistence ───────────────────────────────────────────────
-
-def _config_path():
-    return SERVER_DIR / ".webconsole.json"
-
-def load_config():
-    global MIN_RAM, MAX_RAM
-    path = _config_path()
-    if not path.exists():
-        return
-    try:
-        data = json.loads(path.read_text())
-        MIN_RAM = data.get("min_ram", MIN_RAM)
-        MAX_RAM = data.get("max_ram", MAX_RAM)
-    except Exception:
-        pass
-
-def save_config():
-    path = _config_path()
-    try:
-        existing = {}
-        if path.exists():
-            try:
-                existing = json.loads(path.read_text())
-            except Exception:
-                pass
-        existing["min_ram"] = MIN_RAM
-        existing["max_ram"] = MAX_RAM
-        path.write_text(json.dumps(existing, indent=2))
-    except Exception:
-        pass
 
 # ═══════════════════════════════════════════════════════════════════════
-#  HELPERS
+#  HTML template (single-page app, embedded for zero-dependency deploy)
 # ═══════════════════════════════════════════════════════════════════════
-
-def ok(data):
-    return jsonify({"ok": True, **data})
-
-def fail(msg, code=400):
-    return jsonify({"ok": False, "error": msg}), code
-
-def is_running():
-    return server_proc is not None and server_proc.poll() is None
-
-def safe_resolve(path_str):
-    target = (SERVER_DIR / path_str).resolve()
-    if not str(target).startswith(str(SERVER_DIR.resolve())):
-        return None
-    return target
-
-def find_jar():
-    jar = SERVER_DIR / JAR_NAME
-    if jar.exists():
-        return jar
-    for f in sorted(SERVER_DIR.glob("*.jar")):
-        return f
-    return None
-
-def check_eula():
-    eula = SERVER_DIR / "eula.txt"
-    if not eula.exists():
-        eula.write_text("eula=false\n")
-        return False
-    return "eula=true" in eula.read_text().strip()
-
-def get_props():
-    pf = SERVER_DIR / "server.properties"
-    if not pf.exists():
-        return {}
-    props = {}
-    for line in pf.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, _, v = line.partition("=")
-            props[k.strip()] = v.strip()
-    return props
-
-def get_proc_mem(pid):
-    try:
-        out = subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)], text=True).strip()
-        return round(int(out) / 1024, 1) if out else 0
-    except Exception:
-        return 0
-
-def get_uptime(pid):
-    try:
-        out = subprocess.check_output(["ps", "-o", "etime=", "-p", str(pid)], text=True).strip()
-        return out
-    except Exception:
-        return ""
-
-def parse_json_body():
-    return request.get_json(silent=True) or {}
-
-# ═══════════════════════════════════════════════════════════════════════
-#  SERVER PROPERTIES SCHEMA
-# ═══════════════════════════════════════════════════════════════════════
-
-PROPS_SCHEMA = {
-    "online-mode":           {"type": "bool",   "cat": "server",   "label": "Online Mode",       "desc": "Authenticate players with Mojang"},
-    "difficulty":            {"type": "enum",   "cat": "gameplay", "label": "Difficulty",         "desc": "Game difficulty", "opts": ["peaceful","easy","normal","hard"]},
-    "gamemode":              {"type": "enum",   "cat": "gameplay", "label": "Default Gamemode",   "desc": "Default game mode for new players", "opts": ["survival","creative","adventure","spectator"]},
-    "pvp":                   {"type": "bool",   "cat": "gameplay", "label": "PvP",               "desc": "Allow player versus player combat"},
-    "hardcore":              {"type": "bool",   "cat": "gameplay", "label": "Hardcore",           "desc": "Ban on death"},
-    "enable-command-block":  {"type": "bool",   "cat": "server",   "label": "Command Blocks",    "desc": "Enable command blocks"},
-    "spawn-monsters":        {"type": "bool",   "cat": "world",    "label": "Spawn Monsters",     "desc": "Natural monster spawning"},
-    "spawn-animals":         {"type": "bool",   "cat": "world",    "label": "Spawn Animals",      "desc": "Natural animal spawning"},
-    "spawn-npcs":            {"type": "bool",   "cat": "world",    "label": "Spawn NPCs",         "desc": "Natural villager spawning"},
-    "allow-flight":          {"type": "bool",   "cat": "gameplay", "label": "Allow Flight",       "desc": "Allow flying without cheat"},
-    "white-list":            {"type": "bool",   "cat": "server",   "label": "Whitelist",          "desc": "Only whitelisted players can join"},
-    "enforce-whitelist":     {"type": "bool",   "cat": "server",   "label": "Enforce Whitelist",  "desc": "Kick non-whitelisted players on reload"},
-    "enable-query":          {"type": "bool",   "cat": "network",  "label": "Query",              "desc": "Enable GameSpy query protocol"},
-    "enable-rcon":           {"type": "bool",   "cat": "network",  "label": "RCON",               "desc": "Enable remote console access"},
-    "broadcast-rcon-to-ops": {"type": "bool",   "cat": "network",  "label": "Broadcast RCON",     "desc": "Broadcast RCON commands to ops"},
-    "prevent-proxy-connections":{"type": "bool","cat": "network",  "label": "Prevent Proxy",      "desc": "Block proxy connections"},
-    "sync-chunk-writes":     {"type": "bool",   "cat": "world",    "label": "Sync Chunk Writes",  "desc": "Sync world writes to disk"},
-    "max-players":           {"type": "number", "cat": "server",   "label": "Max Players",        "desc": "Maximum concurrent players", "min": 1, "max": 100},
-    "view-distance":         {"type": "number", "cat": "world",    "label": "View Distance",      "desc": "Client view radius in chunks", "min": 2, "max": 32},
-    "simulation-distance":   {"type": "number", "cat": "world",    "label": "Sim Distance",       "desc": "Entity simulation radius", "min": 2, "max": 32},
-    "server-port":           {"type": "number", "cat": "network",  "label": "Server Port",        "desc": "Port to listen on", "min": 1, "max": 65535},
-    "spawn-protection":      {"type": "number", "cat": "world",    "label": "Spawn Protection",   "desc": "Radius around spawn protected", "min": 0},
-    "player-idle-timeout":   {"type": "number", "cat": "server",   "label": "Idle Timeout",       "desc": "Kick idle players after (minutes)", "min": 0},
-    "max-world-size":        {"type": "number", "cat": "world",    "label": "Max World Size",     "desc": "World border radius", "min": 1},
-    "rate-limit":            {"type": "number", "cat": "network",  "label": "Rate Limit",         "desc": "Packets per second limit", "min": 0},
-    "max-tick-time":         {"type": "number", "cat": "server",   "label": "Max Tick Time",      "desc": "Max ms per tick before watchdog", "min": 0},
-    "entity-broadcast-range-percentage": {"type": "number", "cat": "world", "label": "Entity Range %", "desc": "Entity tracking range %", "min": 10, "max": 1000},
-    "network-compression-threshold": {"type": "number", "cat": "network", "label": "Compression", "desc": "Network compression threshold", "min": -1},
-    "motd":                  {"type": "string", "cat": "server",   "label": "MOTD",              "desc": "Message of the Day"},
-    "resource-pack":         {"type": "string", "cat": "server",   "label": "Resource Pack URL", "desc": "URL to a resource pack"},
-    "resource-pack-sha1":    {"type": "string", "cat": "server",   "label": "Pack SHA1",         "desc": "SHA1 hash of the resource pack"},
-    "level-name":            {"type": "string", "cat": "world",    "label": "World Name",        "desc": "World folder name"},
-    "level-seed":            {"type": "string", "cat": "world",    "label": "World Seed",        "desc": "Random seed for world generation"},
-    "generator-settings":    {"type": "string", "cat": "world",    "label": "Generator Settings", "desc": "Superflat/amplified settings"},
-}
-
-def save_props(changes):
-    pf = SERVER_DIR / "server.properties"
-    if not pf.exists():
-        return False, "server.properties not found"
-    lines = pf.read_text(encoding="utf-8").splitlines(keepends=True)
-    changed = set(changes.keys())
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            k = stripped.split("=", 1)[0].strip()
-            if k in changed:
-                lines[i] = f"{k}={changes[k]}\n"
-                changed.discard(k)
-    for k in changed:
-        lines.append(f"{k}={changes[k]}\n")
-    pf.write_text("".join(lines), encoding="utf-8")
-    return True, "Properties saved"
-
-# ═══════════════════════════════════════════════════════════════════════
-#  MODRINTH INTEGRATION
-# ═══════════════════════════════════════════════════════════════════════
-
-MODRINTH_API = "https://api.modrinth.com/v2"
-UA = "mcmanage-termux/1.0"
-
-def _modrinth_get(url, timeout=15):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    res = urllib.request.urlopen(req, timeout=timeout)
-    return json.loads(res.read())
-
-def modrinth_search(query, project_type="modpack", limit=20):
-    try:
-        url = f"{MODRINTH_API}/search?query={urllib.parse.quote(query)}&facets={urllib.parse.quote(json.dumps([[f'project_type:{project_type}']]))}&limit={limit}"
-        data = _modrinth_get(url)
-        return [{
-            "id": h["project_id"],
-            "title": h["title"],
-            "description": h.get("description", ""),
-            "icon_url": h.get("icon_url", ""),
-            "author": h.get("author", ""),
-            "downloads": h.get("downloads", 0),
-            "slug": h.get("slug", ""),
-            "latest_version": h.get("latest_version", ""),
-            "project_type": h.get("project_type", project_type),
-        } for h in data.get("hits", [])]
-    except Exception as e:
-        return {"error": str(e)}
-
-def modrinth_versions(project_id):
-    try:
-        url = f"{MODRINTH_API}/project/{project_id}/version"
-        data = _modrinth_get(url)
-        return [{
-            "id": v["id"],
-            "name": v["name"],
-            "version_number": v["version_number"],
-            "game_versions": v.get("game_versions", []),
-            "loaders": v.get("loaders", []),
-            "files": [{"url": f["url"], "filename": f["filename"], "size": f["size"]} for f in v.get("files", [])],
-            "date": v.get("date_published", ""),
-        } for v in data]
-    except Exception as e:
-        return {"error": str(e)}
-
-def modrinth_download(file_url, dest_path):
-    req = urllib.request.Request(file_url, headers={"User-Agent": UA})
-    res = urllib.request.urlopen(req, timeout=60)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest_path, "wb") as f:
-        while True:
-            chunk = res.read(8192)
-            if not chunk:
-                break
-            f.write(chunk)
-    return dest_path
-
-def list_installed_packs():
-    result = []
-    for sub, pack_type in [("mods", "mod"), ("resourcepacks", "resourcepack")]:
-        d = SERVER_DIR / sub
-        if d.exists():
-            for f in sorted(d.iterdir()):
-                if f.suffix in (".jar", ".zip"):
-                    result.append({
-                        "name": f.name,
-                        "path": str(f.relative_to(SERVER_DIR)),
-                        "size": f.stat().st_size,
-                        "type": pack_type,
-                    })
-    return result
-
-# ═══════════════════════════════════════════════════════════════════════
-#  SERVER PROCESS MANAGEMENT
-# ═══════════════════════════════════════════════════════════════════════
-
-def server_reader(proc):
-    global console_history
-    try:
-        for line in iter(proc.stdout.readline, ""):
-            line = line.rstrip("\n\r")
-            if not line:
-                continue
-            console_history.append(line)
-            if len(console_history) > CONSOLE_MAX:
-                console_history.pop(0)
-            if "]:" in line and "joined the game" in line:
-                with _status_lock:
-                    name = line.split("]:")[-1].strip().split(" ")[0].strip()
-                    if name and name not in status_cache["players"]:
-                        status_cache["players"].append(name)
-            if "]:" in line and "left the game" in line:
-                with _status_lock:
-                    name = line.split("]:")[-1].strip().split(" ")[0].strip()
-                    if name in status_cache["players"]:
-                        status_cache["players"].remove(name)
-    except Exception as e:
-        console_history.append(f"[WebConsole] Reader error: {e}")
-
-def poll_status():
-    global status_cache
-    while True:
-        with _status_lock:
-            running = is_running()
-            status_cache["online"] = running
-            if running and server_proc:
-                pid = server_proc.pid
-                status_cache["mem_mb"] = get_proc_mem(pid)
-                status_cache["uptime"] = get_uptime(pid)
-            else:
-                status_cache["players"] = []
-                status_cache["mem_mb"] = 0
-                status_cache["uptime"] = ""
-        time.sleep(3)
-
-threading.Thread(target=poll_status, daemon=True).start()
-
-def start_minecraft():
-    global server_proc
-    if is_running():
-        return False, "Server already running."
-    jar = find_jar()
-    if not jar:
-        return False, "No server jar found."
-    if not check_eula():
-        return False, "EULA not accepted. Edit eula.txt and set eula=true."
-
-    env = os.environ.copy()
-    env["TERM"] = "dumb"
-
-    if not (SERVER_DIR / "server.properties").exists():
-        subprocess.run(
-            [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}",
-             "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"],
-            cwd=str(SERVER_DIR), capture_output=True, timeout=20, env=env)
-
-    java_cmd = [str(JAVA_BIN), f"-Xms{MIN_RAM}", f"-Xmx{MAX_RAM}",
-                "-Djline.terminal=jline.UnsupportedTerminal", "-jar", str(jar), "--nogui"]
-
-    script_bin = shutil.which("script")
-    if script_bin:
-        cmd_str = shlex.join(java_cmd) if hasattr(shlex, 'join') else " ".join(shlex.quote(x) for x in java_cmd)
-        cmd = [script_bin, "-q", "-c", cmd_str, "/dev/null"]
-    else:
-        cmd = java_cmd
-
-    proc = subprocess.Popen(cmd, cwd=str(SERVER_DIR), stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, stdin=subprocess.PIPE,
-                            text=True, bufsize=1, env=env)
-    server_proc = proc
-    threading.Thread(target=server_reader, args=(proc,), daemon=True).start()
-    with _status_lock:
-        status_cache["started_at"] = datetime.now(timezone.utc).isoformat()
-        status_cache["online"] = True
-    return True, "Server started."
-
-def stop_minecraft(seconds=15):
-    global server_proc
-    if not is_running():
-        return False, "Server not running."
-    proc = server_proc
-    for i in range(seconds, 0, -5):
-        try:
-            proc.stdin.write(f"say §cServer shutdown in {i}s...\n")
-            proc.stdin.flush()
-            time.sleep(min(5, i))
-        except:
-            break
-    try:
-        proc.stdin.write("stop\n")
-        proc.stdin.flush()
-    except:
-        pass
-    try:
-        proc.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    server_proc = None
-    with _status_lock:
-        status_cache["online"] = False
-    return True, "Server stopped."
-
-def send_minecraft(cmd):
-    if not is_running():
-        return False, "Server not running."
-    try:
-        server_proc.stdin.write(cmd + "\n")
-        server_proc.stdin.flush()
-        return True, "Command sent."
-    except Exception as e:
-        return False, str(e)
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — Server lifecycle
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/")
-def index():
-    return HTML
-
-@app.route("/api/status")
-def api_status():
-    with _status_lock:
-        players = list(status_cache["players"])
-        online_count = len(players)
-    props = get_props()
-    return ok({
-        "online": status_cache["online"],
-        "players": players,
-        "online_count": online_count,
-        "max_players": int(props.get("max-players", 20)),
-        "mem_mb": status_cache["mem_mb"],
-        "uptime": status_cache["uptime"],
-        "started_at": status_cache["started_at"],
-        "jar": str(find_jar() or ""),
-        "server_dir": str(SERVER_DIR),
-        "min_ram": MIN_RAM,
-        "max_ram": MAX_RAM,
-    })
-
-@app.route("/api/ram", methods=["GET", "POST"])
-def api_ram():
-    global MIN_RAM, MAX_RAM
-    if request.method == "GET":
-        return ok({"min_ram": MIN_RAM, "max_ram": MAX_RAM})
-    data = parse_json_body()
-    new_min = data.get("min_ram", "").strip().upper()
-    new_max = data.get("max_ram", "").strip().upper()
-    if not re.match(r"^\d+[MG]$", new_min) or not re.match(r"^\d+[MG]$", new_max):
-        return fail("Invalid RAM format. Use e.g. 512M, 1G, 2G, 4G")
-    if is_running():
-        return fail("Stop the server before changing RAM.")
-    MIN_RAM, MAX_RAM = new_min, new_max
-    save_config()
-    return ok({"message": f"RAM set to {MIN_RAM} min / {MAX_RAM} max", "min_ram": MIN_RAM, "max_ram": MAX_RAM})
-
-@app.route("/api/start", methods=["POST"])
-def api_start():
-    ok_, msg = start_minecraft()
-    return ok({"message": msg}) if ok_ else fail(msg)
-
-@app.route("/api/stop", methods=["POST"])
-def api_stop():
-    data = parse_json_body()
-    ok_, msg = stop_minecraft(int(data.get("seconds", 15)))
-    return ok({"message": msg}) if ok_ else fail(msg)
-
-@app.route("/api/restart", methods=["POST"])
-def api_restart():
-    data = parse_json_body()
-    stop_minecraft(int(data.get("seconds", 15)))
-    time.sleep(2)
-    ok_, msg = start_minecraft()
-    return ok({"message": msg}) if ok_ else fail(msg)
-
-@app.route("/api/command", methods=["POST"])
-def api_command():
-    data = parse_json_body()
-    cmd = data.get("command", "").strip()
-    if not cmd:
-        return fail("No command provided.")
-    ok_, msg = send_minecraft(cmd)
-    return ok({"message": msg}) if ok_ else fail(msg)
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — Console (SSE)
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/api/console")
-def api_console():
-    def stream():
-        last_len = 0
-        while True:
-            new_lines = console_history[last_len:]
-            if new_lines:
-                last_len = len(console_history)
-                yield f"data: {json.dumps({'lines': new_lines})}\n\n"
-            else:
-                yield f"data: {json.dumps({'lines': []})}\n\n"
-            time.sleep(0.5)
-    resp = Response(stream(), mimetype="text/event-stream")
-    resp.headers["Cache-Control"] = "no-cache"
-    resp.headers["X-Accel-Buffering"] = "no"
-    return resp
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — File manager
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/api/files")
-def api_files():
-    path_str = request.args.get("path", "")
-    target = safe_resolve(path_str)
-    if target is None:
-        return fail("Access denied.")
-    if target.is_dir():
-        items = []
-        for entry in sorted(target.iterdir()):
-            items.append({
-                "name": entry.name,
-                "path": str(entry.relative_to(SERVER_DIR)),
-                "is_dir": entry.is_dir(),
-                "size": entry.stat().st_size if entry.is_file() else 0,
-                "modified": datetime.fromtimestamp(entry.stat().st_mtime).isoformat(),
-            })
-        return ok({"items": items, "current": str(target.relative_to(SERVER_DIR))})
-    elif target.is_file():
-        try:
-            content = target.read_text(encoding="utf-8", errors="replace")
-            return ok({"content": content, "path": str(target.relative_to(SERVER_DIR)), "name": target.name})
-        except Exception as e:
-            return fail(str(e))
-    return fail("Path not found.")
-
-@app.route("/api/file/save", methods=["POST"])
-def api_file_save():
-    data = parse_json_body()
-    target = safe_resolve(data.get("path", ""))
-    if target is None:
-        return fail("Access denied.")
-    try:
-        target.write_text(data.get("content", ""), encoding="utf-8")
-        return ok({"message": "File saved."})
-    except Exception as e:
-        return fail(str(e))
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — Backups
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/api/backup", methods=["POST"])
-def api_backup():
-    worlds = [d for d in SERVER_DIR.iterdir()
-              if d.is_dir() and ("world" in d.name.lower() or d.name.endswith("-world"))]
-    if not worlds:
-        return fail("No world directories found.")
-    if is_running():
-        try:
-            server_proc.stdin.write("save-all\n")
-            server_proc.stdin.flush()
-        except:
-            pass
-        time.sleep(2)
-    backup_dir = SERVER_DIR / "backups"
-    backup_dir.mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive = backup_dir / f"world-backup-{ts}.tar.gz"
-    with tarfile.open(str(archive), "w:gz") as tar:
-        for d in worlds:
-            tar.add(str(d), arcname=d.name)
-    size = archive.stat().st_size
-    return ok({"message": f"Backup created ({size//1024} KB)", "file": archive.name})
-
-@app.route("/api/backups")
-def api_backups():
-    backup_dir = SERVER_DIR / "backups"
-    if not backup_dir.exists():
-        return ok({"backups": []})
-    files = []
-    for f in sorted(backup_dir.glob("world-backup-*.tar.gz"), reverse=True):
-        files.append({
-            "name": f.name,
-            "size": f.stat().st_size // 1024,
-            "date": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-        })
-    return ok({"backups": files})
-
-@app.route("/api/backup/restore", methods=["POST"])
-def api_backup_restore():
-    data = parse_json_body()
-    archive = safe_resolve("backups/" + data.get("file", ""))
-    if archive is None or not archive.exists():
-        return fail("Backup not found.")
-    if is_running():
-        return fail("Stop the server before restoring a backup.")
-    with tarfile.open(str(archive), "r:gz") as tar:
-        tar.extractall(path=str(SERVER_DIR))
-    return ok({"message": f"Restored from {data.get('file')}."})
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — Properties editor
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/api/properties", methods=["GET", "POST"])
-def api_properties():
-    if request.method == "GET":
-        props = get_props()
-        rich = {}
-        for k, v in props.items():
-            entry = dict(PROPS_SCHEMA.get(k, {"type": "string", "cat": "other", "label": k, "desc": ""}))
-            entry["key"] = k
-            entry["value"] = v
-            rich[k] = entry
-        for k, s in PROPS_SCHEMA.items():
-            if k not in rich:
-                entry = dict(s)
-                entry["key"] = k
-                entry["value"] = s.get("default", "")
-                rich[k] = entry
-        return ok({"properties": list(rich.values())})
-
-    data = parse_json_body()
-    changes = data.get("changes", {})
-    if not changes:
-        return fail("No changes provided.")
-    if is_running():
-        return fail("Stop the server for some property changes to take effect, or restart after saving.")
-    ok_, msg = save_props(changes)
-    return ok({"message": msg}) if ok_ else fail(msg)
-
-# ═══════════════════════════════════════════════════════════════════════
-#  WEB ROUTES — Modpacks / Resource Packs
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.route("/api/packs/search")
-def api_packs_search():
-    q = request.args.get("q", "")
-    pt = request.args.get("type", "modpack")
-    prov = request.args.get("provider", "modrinth")
-    if not q:
-        return fail("Search query required.")
-    if prov != "modrinth":
-        return fail(f"Unknown provider: {prov}")
-    results = modrinth_search(q, pt)
-    if isinstance(results, dict) and "error" in results:
-        return fail(results["error"])
-    return ok({"results": results, "provider": prov, "type": pt})
-
-@app.route("/api/packs/versions")
-def api_packs_versions():
-    pid = request.args.get("id", "")
-    if not pid:
-        return fail("Project ID required.")
-    versions = modrinth_versions(pid)
-    if isinstance(versions, dict) and "error" in versions:
-        return fail(versions["error"])
-    return ok({"versions": versions})
-
-@app.route("/api/packs/install", methods=["POST"])
-def api_packs_install():
-    data = parse_json_body()
-    file_url = data.get("file_url", "")
-    filename = data.get("filename", "pack.zip")
-    pack_type = data.get("type", "modpack")
-    if not file_url:
-        return fail("No file URL provided.")
-    dest_dir = SERVER_DIR / ("resourcepacks" if pack_type == "resourcepack" else "mods")
-    dest = dest_dir / filename
-    try:
-        modrinth_download(file_url, dest)
-    except Exception as e:
-        return fail(f"Download failed: {e}")
-    return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(SERVER_DIR))})
-
-@app.route("/api/packs/installed")
-def api_packs_installed():
-    return ok({"packs": list_installed_packs()})
-
-@app.route("/api/packs/remove", methods=["POST"])
-def api_packs_remove():
-    data = parse_json_body()
-    target = safe_resolve(data.get("path", ""))
-    if target is None:
-        return fail("Access denied.")
-    if not target.exists():
-        return fail("File not found.")
-    target.unlink()
-    return ok({"message": f"Removed {target.name}"})
-
-# ── HTML ──────────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -1099,8 +452,6 @@ function showPackTab(tab) {
   if (tab === 'installed') loadInstalledPacks();
 }
 
-let _packSearchTimeout = null;
-
 async function searchPacks() {
   const q = $('packSearchInput').value.trim();
   const type = $('packTypeSelect').value;
@@ -1202,11 +553,9 @@ function setupConsole() {
   es.onmessage = e => {
     const d = JSON.parse(e.data);
     if (!d.lines || !d.lines.length) return;
-    // Only append new lines (after the first batch)
     if (lineCount > 0 && d.lines.length <= lineCount) return;
     const newLines = lineCount === 0 ? d.lines : d.lines.slice(lineCount);
     lineCount = d.lines.length;
-    // Clear placeholder on first real output
     if (d.lines.length > 0 && out.children.length === 1 && out.children[0].textContent.includes('not running')) {
       out.innerHTML = '';
     }
@@ -1214,10 +563,8 @@ function setupConsole() {
       const div = document.createElement('div');
       let cls = '';
       let text = line;
-      // Strip Minecraft color codes
       text = text.replace(/\xa7[0-9a-fklmnor]/g, '');
       text = text.replace(/\u00a7[0-9a-fklmnor]/g, '');
-      // Color by log level
       if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
       if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
       if (/\[.*\/ERROR\]:/.test(line)) cls = 'error';
@@ -1227,7 +574,6 @@ function setupConsole() {
       if (/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[Server thread\/INFO\]: Done /.test(line)) cls = 'done';
       if (/]: .* whispers: /.test(line)) cls = 'say';
       if (/]: .* </.test(line) && !/]: \[Not Secure\]/.test(line)) cls = 'say';
-      // Timestamp from log line
       let ts = '';
       const tm = line.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
       if (tm) ts = tm[1];
@@ -1344,35 +690,46 @@ loadDashboard();
 </html>
 """
 
-# ── CLI ───────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+#  Import routes (registers them on app; app & HTML must be defined first)
+# ═══════════════════════════════════════════════════════════════════════
+
+from mc_server import start_polling  # noqa: E402
+import mc_routes  # noqa: E402, F401
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  CLI
+# ═══════════════════════════════════════════════════════════════════════
 
 def main():
-    global SERVER_DIR, PORT, HOST
     ap = argparse.ArgumentParser(description="Minecraft Web Manager for Termux")
-    ap.add_argument("--dir", help=f"Server directory (default: {SERVER_DIR})")
-    ap.add_argument("--port", type=int, help=f"Web port (default: {PORT})")
-    ap.add_argument("--host", help=f"Bind address (default: {HOST})")
+    ap.add_argument("--dir", help=f"Server directory (current: {mc_state.SERVER_DIR})")
+    ap.add_argument("--port", type=int, help=f"Web port (default: {mc_state.PORT})")
+    ap.add_argument("--host", help=f"Bind address (default: {mc_state.HOST})")
     args = ap.parse_args()
     if args.dir:
-        SERVER_DIR = Path(args.dir).resolve()
+        mc_state.SERVER_DIR = Path(args.dir).resolve()
     if args.port:
-        PORT = args.port
+        mc_state.PORT = args.port
     if args.host:
-        HOST = args.host
+        mc_state.HOST = args.host
 
-    if not SERVER_DIR.exists():
-        print(f"[!] Server directory does not exist: {SERVER_DIR}")
+    if not mc_state.SERVER_DIR.exists():
+        print(f"[!] Server directory does not exist: {mc_state.SERVER_DIR}")
         sys.exit(1)
 
     load_config()
+    start_polling()
 
     print(f" Minecraft Web Manager")
-    print(f"  Server directory: {SERVER_DIR}")
-    print(f"  Web URL:          http://localhost:{PORT}")
+    print(f"  Server directory: {mc_state.SERVER_DIR}")
+    print(f"  Web URL:          http://localhost:{mc_state.PORT}")
     print(f"  Start server:     Open browser and click Start")
     print()
 
-    app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
+    app.run(host=mc_state.HOST, port=mc_state.PORT, debug=False, use_reloader=False)
+
 
 if __name__ == "__main__":
     main()
