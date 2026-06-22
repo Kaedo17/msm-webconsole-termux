@@ -24,7 +24,7 @@ Run a full Minecraft Java server on your Android phone via Termux.
 ## Quick Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/YOUR_USER/mcmanage/main/mcmanage.sh -o mcmanage.sh
+curl -sL https://raw.githubusercontent.com/Kaedo17/mcmanage/main/mcmanage.sh -o mcmanage.sh
 chmod +x mcmanage.sh
 ./mcmanage.sh init
 ```
