@@ -7,7 +7,6 @@ Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
 import argparse
 import json
 import os
-import queue
 import shutil
 import subprocess
 import sys
@@ -36,9 +35,8 @@ MIN_RAM = os.environ.get("MIN_RAM", "512M")
 
 # ── Globals ───────────────────────────────────────────────────────────
 app = Flask(__name__)
-server_proc: subprocess.Popen | None = None
-console_queue: queue.Queue = queue.Queue()
-console_history: list[str] = []
+server_proc = None
+console_history = []
 status_cache = {"online": False, "players": [], "tps": 0, "uptime": 0, "mem_mb": 0, "started_at": ""}
 _status_lock = threading.Lock()
 CONSOLE_MAX = 500
@@ -97,15 +95,14 @@ def get_uptime(pid):
 # ── Server Process ────────────────────────────────────────────────────
 
 def server_reader(proc):
-    history = []
+    global console_history
     for line in iter(proc.stdout.readline, ""):
         line = line.rstrip("\n\r")
         if not line:
             continue
-        history.append(line)
-        if len(history) > CONSOLE_MAX:
-            history.pop(0)
-        console_queue.put(line)
+        console_history.append(line)
+        if len(console_history) > CONSOLE_MAX:
+            console_history.pop(0)
         # Parse player list from log
         if "]:" in line and "joined the game" in line:
             with _status_lock:
@@ -117,8 +114,6 @@ def server_reader(proc):
                 name = line.split("]:")[-1].strip().split(" ")[0].strip()
                 if name in status_cache["players"]:
                     status_cache["players"].remove(name)
-    global console_history
-    console_history = history
 
 def poll_status():
     global status_cache
@@ -632,21 +627,36 @@ function setupConsole() {
   const out = $('consoleOutput');
   const es = new EventSource('/api/console');
   consoleStream = es;
+  let lineCount = 0;
   es.onmessage = e => {
     const d = JSON.parse(e.data);
     if (!d.lines || !d.lines.length) return;
-    for (const line of d.lines) {
+    // Only append new lines (after the first batch)
+    if (lineCount > 0 && d.lines.length <= lineCount) return;
+    const newLines = lineCount === 0 ? d.lines : d.lines.slice(lineCount);
+    lineCount = d.lines.length;
+    for (const line of newLines) {
       const div = document.createElement('div');
-      let text = line;
       let cls = '';
-      if (line.includes('[INFO]') || line.includes(']: <')) cls = 'info';
-      if (line.includes('[WARN]')) cls = 'warn';
-      if (line.includes('[ERROR]')) cls = 'error';
-      if (line.includes('[SERVER]') && line.includes('joined the game')) cls = 'done';
-      if (line.includes('[SERVER]') && line.includes('left the game')) cls = 'warn';
-      if (line.match(/]: .* whispered/) || line.match(/]: .*!</)) cls = 'say';
-      if (line.startsWith('Done ') || line.includes(')! For help')) cls = 'done';
-      div.innerHTML = `<span class="ts"></span><span class="${cls}">${escapeHtml(text)}</span>`;
+      let text = line;
+      // Strip Minecraft color codes
+      text = text.replace(/\\xa7[0-9a-fklmnor]/g, '');
+      text = text.replace(/\\u00a7[0-9a-fklmnor]/g, '');
+      // Color by log level
+      if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
+      if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
+      if (/\[.*\/ERROR\]:/.test(line)) cls = 'error';
+      if (/joined the game/.test(line)) cls = 'done';
+      if (/left the game/.test(line)) cls = 'warn';
+      if (/\[.*\/FATAL\]:/.test(line)) cls = 'error';
+      if (/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\] \[Server thread\/INFO\]: Done /.test(line)) cls = 'done';
+      if (/]: .* whispers: /.test(line)) cls = 'say';
+      if (/]: .* </.test(line) && !/]: \[Not Secure\]/.test(line)) cls = 'say';
+      // Timestamp from log line
+      let ts = '';
+      const tm = line.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
+      if (tm) ts = tm[1];
+      div.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${escapeHtml(text)}</span>`;
       out.appendChild(div);
     }
     out.scrollTop = out.scrollHeight;
