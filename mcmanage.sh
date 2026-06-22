@@ -7,7 +7,7 @@
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 SERVER_DIR="${SERVER_DIR:-$SCRIPT_DIR}"
 SERVER_JAR="${SERVER_JAR:-server.jar}"
-JAVA_ARGS="-Xms1G -Xmx2G -XX:+UseG1GC -jar"
+JAVA_ARGS="-Xms1G -Xmx2G -XX:+UseG1GC -Djline.terminal=jline.UnsupportedTerminal -jar"
 SCREEN_SESSION="minecraft-server"
 PID_FILE="$SERVER_DIR/server.pid"
 LOG_FILE="$SERVER_DIR/server.log"
