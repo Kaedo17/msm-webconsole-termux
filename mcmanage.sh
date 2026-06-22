@@ -4,7 +4,7 @@
 #  Minecraft Java Server Manager for Termux (Android)
 # ======================================================
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 SERVER_DIR="${SERVER_DIR:-$SCRIPT_DIR}"
 SERVER_JAR="${SERVER_JAR:-server.jar}"
 JAVA_ARGS="-Xms1G -Xmx2G -XX:+UseG1GC -jar"
@@ -534,7 +534,7 @@ link_to_path() {
     [ -f "$target" ] || [ -L "$target" ] && rm -f "$target"
 
     chmod +x "$0"
-    local abs_path; abs_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    local abs_path; abs_path="$(readlink -f "$0")"
     ln -sf "$abs_path" "$target"
 
     if ! [ -f "$target" ] && ! [ -L "$target" ]; then
