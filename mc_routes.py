@@ -116,16 +116,27 @@ def register_routes(app, html):
             sent = len(hist)
             # Send full history first
             if sent > 0:
-                yield f"data: {json.dumps({'lines': hist[:]})}\n\n"
+                try:
+                    yield f"data: {json.dumps({'lines': hist[:]})}\n\n"
+                except Exception:
+                    pass
             try:
-                while not request.is_disconnected():
+                while True:
+                    try:
+                        if request.is_disconnected():
+                            break
+                    except Exception:
+                        break
                     try:
                         line = q.get(timeout=1)
                         yield f"data: {json.dumps({'lines': [line]})}\n\n"
                     except queue.Empty:
                         yield f"data: {json.dumps({'lines': []})}\n\n"
+            except Exception:
+                pass
             finally:
-                _console_connections -= 1
+                if _console_connections > 0:
+                    _console_connections -= 1
 
         resp = Response(stream(), mimetype="text/event-stream")
         resp.headers["Cache-Control"] = "no-cache"

@@ -174,7 +174,7 @@ HTML = r"""<!DOCTYPE html>
     <a href="#" class="active" data-page="dashboard">Dashboard</a>
     <a href="#" data-page="console">Console</a>
     <a href="#" data-page="properties">Settings</a>
-    <a href="#" data-page="packs">Packs</a>
+    <a href="#" data-page="packs">Mods & Packs</a>
     <a href="#" data-page="files">File Manager</a>
     <a href="#" data-page="backups">Backups</a>
   </nav>
@@ -213,9 +213,9 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div id="packBrowse">
         <div class="pack-search-bar">
-          <input type="text" id="packSearchInput" placeholder="Search modpacks..." onkeydown="if(event.key==='Enter')searchPacks()">
+          <input type="text" id="packSearchInput" placeholder="Search modpacks & mods..." onkeydown="if(event.key==='Enter')searchPacks()">
           <select id="packProviderSelect"><option value="modrinth">Modrinth</option><option value="sourceforge">SourceForge</option></select>
-          <select id="packTypeSelect"><option value="modpack">Packs</option><option value="resourcepack">Resource Packs</option></select>
+          <select id="packTypeSelect"><option value="modpack">Modpacks</option><option value="mod">Mods</option><option value="resourcepack">Resource Packs</option></select>
           <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
         </div>
         <div id="packResults"></div>
