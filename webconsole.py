@@ -570,6 +570,7 @@ function updateStatus(data) {
     dot.className = 'dot red';
     label.textContent = 'Stopped';
     label.style.color = '#ff4444';
+    hideRestartBanner();
   }
   $('memStat').textContent = (data && data.mem_mb) ? `${data.mem_mb} MB` : '— MB';
   $('playerStat').textContent = (data && data.online != null) ? `${data.online_count}/${data.max_players} online` : '—';
@@ -914,28 +915,45 @@ async function loadProperties() {
     }
     html += '</div>';
   }
-  html += `<div class="props-save-bar"><button class="btn btn-save" onclick="saveProperties()" id="propsSaveBtn">Save Properties</button></div>`;
-  $('page-properties').innerHTML = html;
+  html += '</div>';
+  $('page-properties').innerHTML = '<div id="propsBanner"></div>' + html;
   window._propChanges = {};
 }
+
+let _saveTimeout = null;
 
 function propChanged(key, value) {
   if (!window._propChanges) window._propChanges = {};
   window._propChanges[key] = value;
+  if (_saveTimeout) clearTimeout(_saveTimeout);
+  _saveTimeout = setTimeout(autoSaveProperties, 300);
 }
 
-async function saveProperties() {
+function showRestartBanner() {
+  const b = $('propsBanner');
+  if (!b) return;
+  b.innerHTML = '<div style="background:#332200;border:1px solid #664400;border-radius:4px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#ffcc00">Restart server to apply property changes</div>';
+}
+
+function hideRestartBanner() {
+  const b = $('propsBanner');
+  if (b) b.innerHTML = '';
+}
+
+async function autoSaveProperties() {
   const changes = window._propChanges || {};
-  if (!Object.keys(changes).length) { toast('No changes to save', 'info'); return; }
-  const btn = $('propsSaveBtn');
-  btn.textContent = 'Saving...';
-  btn.disabled = true;
-  const d = await api('properties', {changes});
-  btn.textContent = 'Save Properties';
-  btn.disabled = false;
+  if (!Object.keys(changes).length) return;
+  const r = await fetch(`/api/servers/${_currentServer}/properties`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({changes})
+  });
+  const d = await r.json();
   if (d.ok) {
     window._propChanges = {};
-    toast('Properties saved — restart server to apply', 'success');
+    if (d.restart_required) showRestartBanner();
+    else hideRestartBanner();
+  } else {
+    toast(d.error || 'Failed to save', 'error');
   }
 }
 

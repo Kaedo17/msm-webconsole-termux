@@ -409,10 +409,11 @@ def register_routes(app, html):
         changes = data.get("changes", {})
         if not changes:
             return fail("No changes provided.")
-        if inst.is_running():
-            return fail("Stop the server for some property changes to take effect.")
         ok_, msg = save_props(inst.dir, changes)
-        return ok({"message": msg}) if ok_ else fail(msg)
+        resp = {"message": msg}
+        if ok_ and inst.is_running():
+            resp["restart_required"] = True
+        return ok(resp) if ok_ else fail(msg)
 
     # ═══════════════════════════════════════════════════════════════════
     #  MODPACKS / RESOURCE PACKS — per-server
