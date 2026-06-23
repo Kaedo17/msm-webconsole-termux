@@ -1224,10 +1224,15 @@ async function loadTunnel() {
   html += '</div>';
   if (daemonOn && !claimed) {
     html += '<div style="padding:16px;background:#1a2a1a;border:1px solid #2a2a2a;border-radius:8px;margin-top:12px">';
-    html += '<p style="color:#ccc;margin-bottom:8px"><b>Get your claim code:</b></p>';
-    html += '<p style="color:#888;font-size:13px;margin-bottom:6px">Run this command in a new Termux session:</p>';
-    html += '<code id="playitClaimCmd" style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all">playit-cli</code>';
-    html += '<p style="color:#888;font-size:12px;margin-top:6px">Copy the code from the output (playit.gg/claim/&lt;code&gt;) and enter it at playit.gg.</p>';
+    html += '<p style="color:#ccc;margin-bottom:8px"><b>1. Get your claim code</b></p>';
+    html += '<p style="color:#888;font-size:13px;margin-bottom:6px">Open a <b>new</b> Termux session and run:</p>';
+    html += '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:6px">playit-cli</code>';
+    html += '<p style="color:#888;font-size:12px">It will output something like: <code style="background:#111;padding:2px 6px;border-radius:3px;color:#64b5f6;font-size:12px">playit.gg/claim/<b style="color:#5ced73">abc123xyz</b></code></p>';
+    html += '<p style="color:#888;font-size:12px;margin-top:4px">The bold part is your claim code.</p>';
+    html += '<p style="color:#ccc;margin:12px 0 8px"><b>2. Enter the code on playit.gg</b></p>';
+    html += '<p style="color:#888;font-size:12px;margin-bottom:6px">Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a>, enter the code, and follow the instructions.</p>';
+    html += '<p style="color:#ccc;margin:12px 0 8px"><b>3. Refresh this page</b></p>';
+    html += '<p style="color:#888;font-size:12px">After claiming, click <b>Refresh</b> above — status will show <b style="color:#5ced73">Online</b>.</p>';
     html += '</div>';
   }
   html += '<div id="playitOutput"></div>';
@@ -1245,10 +1250,10 @@ async function startDaemon() {
     const d = await r.json();
     if (d.ok) {
       outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
-        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Run this in a <b>new</b> Termux session to get your claim code:</p>'
-        + '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:8px">playit-cli</code>'
-        + '<p style="color:#888;font-size:12px">Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a> and enter the code shown in the output.</p>';
-      setTimeout(loadTunnel, 2000);
+        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Open a <b>new</b> Termux session and run:</p>'
+        + '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:6px">playit-cli</code>'
+        + '<p style="color:#888;font-size:12px">It will output something like: <code style="background:#111;padding:2px 6px;border-radius:3px;color:#64b5f6;font-size:12px">playit.gg/claim/<b style="color:#5ced73">CODE</b></code></p>'
+        + '<p style="color:#888;font-size:12px;margin-top:4px">The bold part is your claim code. Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a> to enter it.</p>';
     } else {
       outDiv.textContent = d.error || 'Failed.';
     }
