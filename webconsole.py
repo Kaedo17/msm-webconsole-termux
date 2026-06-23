@@ -1204,23 +1204,36 @@ async function installPlayit() {
 }
 
 async function startPlayit() {
-  const c = $('tunnelContent');
-  const out = $('playitOutput');
-  if (!out) { c.innerHTML += '<div id="playitOutput" style="font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap"></div>'; }
-  $('playitOutput').textContent = 'Starting tunnel...';
-  const r = await fetch('/api/playit/start', {method:'POST'});
-  const d = await r.json();
-  if (d.ok && d.claim) {
-    $('playitOutput').innerHTML = `
-      <p style="color:#5ced73;margin-bottom:8px">Tunnel started! Claim it at:</p>
-      <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px">${d.claim}</a>
-      <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions.</p>
-      <p style="color:#888">After claiming, refresh this page to see your tunnel info.</p>`;
-  } else if (d.ok && d.ip) {
-    $('playitOutput').textContent = `Tunnel ready! Public: ${d.ip}:${d.port}`;
-    loadTunnel();
-  } else {
-    $('playitOutput').textContent = d.error || d.message || 'Failed to start tunnel.';
+  const outDiv = $('playitOutput') || document.createElement('div');
+  if (!outDiv.id) { outDiv.id = 'playitOutput'; outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap'; $('tunnelContent').appendChild(outDiv); }
+  outDiv.textContent = 'Starting tunnel (this may take a minute)...';
+  try {
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 60000);
+    const r = await fetch('/api/playit/start', {method:'POST', signal: ac.signal});
+    clearTimeout(timeout);
+    const d = await r.json();
+    if (!d.ok) { outDiv.textContent = d.error || 'Failed.'; return; }
+    if (d.claim) {
+      outDiv.innerHTML = `
+        <p style="color:#5ced73;margin-bottom:8px">Tunnel started! Claim it at:</p>
+        <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px">${d.claim}</a>
+        <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions.</p>
+        <p style="color:#888">After claiming, refresh this page to see your tunnel info.</p>`;
+    } else if (d.ip) {
+      outDiv.textContent = `Tunnel ready! Public: ${d.ip}:${d.port}`;
+      loadTunnel();
+    } else if (d.message) {
+      outDiv.textContent = d.message;
+      if (d.lines && d.lines.length) outDiv.textContent += '\n\n' + d.lines.join('\n');
+    } else {
+      outDiv.textContent = 'Tunnel started. Check the page for status.';
+    }
+    if (d.lines && d.lines.length) {
+      outDiv.textContent += '\n\nOutput:\n' + d.lines.join('\n');
+    }
+  } catch(e) {
+    $('playitOutput').textContent = 'Request timed out or failed. Try again.';
   }
 }
 

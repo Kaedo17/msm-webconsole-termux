@@ -1,8 +1,4 @@
-"""Playit.gg tunnel integration for exposing Minecraft servers to the internet.
-
-Checks if playit-cli is installed, provides install instructions, runs the
-tunnel, extracts the claim URL, and monitors tunnel status.
-"""
+"""Playit.gg tunnel integration for exposing Minecraft servers to the internet."""
 
 import os
 import re
@@ -31,7 +27,7 @@ def get_version():
     if not is_installed():
         return ""
     try:
-        out = subprocess.check_output([PLAYIT_BIN, "--version"], text=True, timeout=10, stderr=subprocess.STDOUT)
+        out = subprocess.check_output([PLAYIT_BIN, "--version"], text=True, timeout=10, stderr=subprocess.PIPE)
         return out.strip()
     except Exception:
         return ""
@@ -41,76 +37,77 @@ def is_claimed():
     return PLAYIT_SECRET.exists()
 
 
-def start_tunnel(timeout=15):
-    """Start playit-cli and capture claim URL or tunnel info.
-    Returns (success, result_string)."""
+def start_tunnel(timeout=30):
+    """Start playit-cli, capture claim URL or tunnel info.
+    Returns (success, result_dict)."""
     if not is_installed():
-        return False, "Playit not installed."
+        return False, {"error": "Playit not installed."}
+
+    if is_claimed():
+        try:
+            proc = subprocess.Popen(
+                [PLAYIT_BIN],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL, text=True,
+            )
+            return True, {"message": "Tunnel was already claimed. Check tunnel page.", "proc_pid": proc.pid}
+        except Exception as e:
+            return False, {"error": str(e)}
 
     try:
         proc = subprocess.Popen(
             [PLAYIT_BIN],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, bufsize=1,
         )
 
         lines = []
         claim_url = None
-        tunnel_ip = None
-        tunnel_port = None
+        start_time = time.time()
 
-        for _ in range(timeout):
-            try:
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                line = line.strip()
+        while time.time() - start_time < timeout:
+            ret = proc.poll()
+            out_line = proc.stdout.readline() if proc.stdout else ""
+            err_line = proc.stderr.readline() if proc.stderr else ""
+            line = (out_line or err_line).strip()
+            if line:
                 lines.append(line)
-
+                line_lower = line.lower()
                 m = re.search(r'https://playit\.gg/claim/(\S+)', line)
                 if m:
                     claim_url = m.group(0)
-
-                m = re.search(r'Public:\s*(\d+\.\d+\.\d+\.\d+):(\d+)', line)
+                    break
+                m = re.search(r'claim\s*(?:url|this|at)?\s*:?\s*(https://[^\s]+)', line)
                 if m:
-                    tunnel_ip = m.group(1)
-                    tunnel_port = m.group(2)
-
-                if tunnel_ip and claim_url:
+                    claim_url = m.group(1)
                     break
-
-                if "tunnel ready" in line.lower() and not claim_url:
-                    break
-            except Exception:
+                m = re.search(r'public[:\s]+(\d+\.\d+\.\d+\.\d+)[:\s](\d+)', line_lower)
+                if m:
+                    return True, {"ip": m.group(1), "port": m.group(2), "lines": lines}
+                if "already running" in line_lower:
+                    return True, {"message": "Tunnel already running.", "lines": lines}
+            if ret is not None and not out_line and not err_line:
                 break
-            time.sleep(0.5)
+            time.sleep(0.3)
+
+        proc.kill()
+        proc.wait(timeout=5)
 
         if claim_url:
-            return True, jsonify_result(claim=claim_url, lines=lines)
+            return True, {"claim": claim_url, "lines": lines}
 
-        if tunnel_ip:
-            return True, jsonify_result(ip=tunnel_ip, port=tunnel_port, lines=lines)
+        if lines:
+            return True, {"message": "Tunnel output captured", "lines": lines, "claimed": is_claimed()}
 
-        # Check process status
-        proc.poll()
-        if proc.returncode is not None:
-            output = "\n".join(lines)
-            if "already running" in output.lower():
-                return True, jsonify_result(message="Tunnel already running (previous session)", lines=lines)
-            return False, f"Playit exited: {output}"
-
-        return True, jsonify_result(message="Started, waiting for claim or tunnel info", lines=lines)
+        return True, {"message": "Tunnel started (no output yet). Run again in a few seconds.", "lines": lines}
 
     except FileNotFoundError:
-        return False, "Playit not found."
+        return False, {"error": "Playit not found."}
     except Exception as e:
-        return False, str(e)
+        return False, {"error": str(e)}
 
 
 def check_tunnel_status():
-    """Check if playit tunnel is currently running."""
     if not is_installed():
         return {"installed": False, "claimed": False, "running": False}
 
@@ -122,8 +119,8 @@ def check_tunnel_status():
 
     try:
         out = subprocess.check_output(
-            [PLAYIT_BIN, "status"],
-            text=True, timeout=10, stderr=subprocess.STDOUT,
+            [PLAYIT_BIN, "status"], text=True, timeout=10,
+            stderr=subprocess.STDOUT,
         )
         result["running"] = "running" in out.lower() or "active" in out.lower()
         for line in out.splitlines():
@@ -131,6 +128,7 @@ def check_tunnel_status():
             if m:
                 result["public_ip"] = m.group(1)
                 result["public_port"] = int(m.group(2))
+                result["running"] = True
     except subprocess.CalledProcessError:
         result["running"] = False
     except FileNotFoundError:
@@ -139,7 +137,3 @@ def check_tunnel_status():
         result["running"] = False
 
     return result
-
-
-def jsonify_result(**kwargs):
-    return kwargs

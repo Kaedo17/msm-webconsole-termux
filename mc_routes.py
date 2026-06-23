@@ -518,4 +518,4 @@ def register_routes(app, html):
         ok_, result = mc_playit.start_tunnel()
         if ok_:
             return ok(result)
-        return fail(result)
+        return fail(result.get("error", "Tunnel failed to start"))
