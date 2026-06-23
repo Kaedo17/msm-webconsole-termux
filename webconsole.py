@@ -767,7 +767,10 @@ async function doCreateServer() {
   const seed = $('csSeed')?.value.trim();
   if (seed) body.level_seed = seed;
   const d = await api('servers', body);
-  if (d.ok) { loadServers(); toast(`Server '${name}' created!`, 'success'); }
+  loadServers();
+  if (d && d.ok && d.server) {
+    selectServer(d.server.id);
+  }
 }
 
 function showImportModal() { $('importModal').classList.add('show'); }
