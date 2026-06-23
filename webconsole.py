@@ -1316,6 +1316,7 @@ function renderTunnelPage(d) {
   html += '<div class="server-actions">';
   if (!daemonOn) html += '<button class="btn btn-start" onclick="startDaemon()" id="daemonBtn">Start Daemon</button>';
   if (daemonOn && !claimed) html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Get Claim URL</button>';
+  if (daemonOn) html += '<button class="btn btn-stop" onclick="stopDaemon()" id="stopDaemonBtn">Stop Daemon</button>';
   html += '<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>';
   html += '</div>';
 
@@ -1397,6 +1398,22 @@ async function startDaemon() {
   } catch(e) {
     toast('Request failed', 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Start Daemon'; }
+  }
+}
+
+async function stopDaemon() {
+  const btn = $('stopDaemonBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Stopping...'; }
+  try {
+    const r = await fetch('/api/playit/daemon/stop', {method:'POST'});
+    const d = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = 'Stop Daemon'; }
+    if (!d.ok) { toast(d.error || 'Failed to stop daemon', 'error'); return; }
+    toast('Daemon stopped', 'success');
+    loadTunnel();
+  } catch(e) {
+    toast('Request failed', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Stop Daemon'; }
   }
 }
 

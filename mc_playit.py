@@ -99,6 +99,27 @@ def start_daemon():
         return False, str(e)
 
 
+def stop_daemon():
+    global _daemon_proc
+    proc = _daemon_proc
+    if not proc or proc.poll() is not None:
+        try:
+            subprocess.run(["pkill", "-x", "playitd"], capture_output=True, timeout=5)
+        except Exception:
+            pass
+    else:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=3)
+    _daemon_proc = None
+    with _lock:
+        _daemon_logs.append("[daemon] Stopped by user")
+    return True, "Daemon stopped"
+
+
 def get_logs(n=100):
     with _lock:
         return list(_daemon_logs)[-n:]

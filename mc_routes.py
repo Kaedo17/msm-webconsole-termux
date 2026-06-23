@@ -549,6 +549,13 @@ def register_routes(app, html):
             return ok({"message": msg})
         return fail(msg)
 
+    @app.route("/api/playit/daemon/stop", methods=["POST"])
+    def api_playit_daemon_stop():
+        ok_, msg = mc_playit.stop_daemon()
+        if ok_:
+            return ok({"message": msg})
+        return fail(msg)
+
     @app.route("/api/playit/cli", methods=["POST"])
     def api_playit_cli():
         ok_, out, lines = mc_playit.run_cli()
