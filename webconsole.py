@@ -1354,7 +1354,7 @@ function renderTunnelPage(d) {
 
   html += '<div style="margin-top:16px">';
   html += '<div class="console-wrap">';
-  html += '<div class="console-header"><span>Daemon Logs</span><span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="copyDaemonLogs()">Copy</button></span></div>';
+  html += '<div class="console-header"><span>Playit Logs</span><span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="copyDaemonLogs()">Copy</button></span></div>';
   html += '<div class="console" id="daemonLogs" style="height:300px">';
   if (logs.length) {
     for (const l of logs.slice(-80)) html += `<div>${escapeHtml(l)}</div>`;

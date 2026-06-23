@@ -158,6 +158,9 @@ def run_cli(timeout=12):
         thr.join(timeout=timeout)
         proc.kill()
         proc.wait(timeout=5)
+        with _lock:
+            for line in collected:
+                _daemon_logs.append(line)
         return True, "\n".join(collected), collected
     except Exception as e:
         return False, str(e), []
