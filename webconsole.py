@@ -1265,6 +1265,7 @@ register_routes(app, HTML)
 
 def main():
     ap = argparse.ArgumentParser(description="Minecraft Web Manager for Termux")
+    ap.add_argument("--dir", help="Server directory to import (adds to ~/mc-servers/)")
     ap.add_argument("--port", type=int, help=f"Web port (default: {mc_state.PORT})")
     ap.add_argument("--host", help=f"Bind address (default: {mc_state.HOST})")
     args = ap.parse_args()
@@ -1275,6 +1276,18 @@ def main():
 
     import mc_instances as mci
     mci.load_registry()
+
+    if args.dir:
+        path = Path(args.dir).resolve()
+        if path.exists():
+            inst, msg = mci.import_server(str(path))
+            if inst:
+                print(f" Imported server '{inst.name}' from {path}")
+            else:
+                print(f" {msg}")
+        else:
+            print(f" Directory not found: {path}")
+            print(f" Create it and add a server.jar, or use the web UI.")
 
     if not mci.all_servers():
         print(" No Minecraft servers found in ~/mc-servers/")
