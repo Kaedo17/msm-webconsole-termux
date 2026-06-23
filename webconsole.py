@@ -1231,7 +1231,9 @@ async function loadTunnel() {
     html += '<li>Log in or create an account</li>';
     html += '<li>Your agent should appear — click <b>Claim</b></li>';
     html += '<li>Come back here and click <b>Refresh</b></li>';
-    html += '</ol></div>';
+    html += '</ol>';
+    html += '<p style="color:#666;font-size:12px;margin-top:8px">Alternative: run <code style="background:#111;padding:2px 6px;border-radius:3px">playit-cli</code> in Termux to get a claim URL.</p>';
+    html += '</div>';
   }
   html += '<div id="playitOutput"></div>';
   c.innerHTML = html;

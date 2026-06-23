@@ -44,14 +44,23 @@ def is_claimed():
     return _PLAYIT_SECRET.exists()
 
 
-def _capture_output(cmd, timeout=25):
+def _capture_output(cmd, timeout=25, source_profile=False):
     """Run a command and capture all output (stdout+stderr). Returns (ok, output_str, lines)."""
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, text=True, bufsize=1,
-        )
+        if source_profile:
+            # Use login shell to source bashrc/profile (important on Termux)
+            shell_cmd = " ".join(cmd) if isinstance(cmd, list) else cmd
+            proc = subprocess.Popen(
+                ["bash", "-l", "-c", shell_cmd],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+            )
         collected = []
         done = threading.Event()
 
@@ -106,9 +115,9 @@ def start_tunnel(timeout=30):
         time.sleep(3)
         all_raw.append(("playitd", "", ["started in background"]))
 
-    # Step 2: Run playit-cli against the running daemon
+    # Step 2: Run playit-cli against the running daemon (use login shell for Termux env)
     if _PLAYIT_CLI:
-        ok, out, lines = _capture_output([_PLAYIT_CLI], timeout=timeout)
+        ok, out, lines = _capture_output([_PLAYIT_CLI], timeout=timeout, source_profile=True)
         all_raw.append(("playit-cli", out, lines))
         claim_url = _find_claim_url(lines)
         if claim_url:
