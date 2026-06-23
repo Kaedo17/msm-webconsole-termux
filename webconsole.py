@@ -1202,46 +1202,39 @@ async function loadTunnel() {
   if (!d.installed) {
     c.innerHTML = `
       <div class="search-status" style="padding:24px">
-        <p style="margin-bottom:12px">Playit.gg is not installed. It lets you share your Minecraft server online without port forwarding.</p>
+        <p style="margin-bottom:12px">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
         <button class="btn btn-cmd" onclick="installPlayit()">Install Playit.gg</button>
       </div>`;
     return;
   }
   const claimed = d.claimed;
   const running = d.running;
-  const pubIp = d.public_ip;
-  const pubPort = d.public_port;
+  const daemonOn = d.daemon_running;
   let html = '<div class="status-grid">';
-  const dot = running ? 'green' : 'red';
-  const statusText = running ? 'Running' : 'Stopped';
-  html += `<div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" style="color:${running?'#5ced73':'#ff4444'}">${statusText}</div></div>`;
-  html += `<div class="stat-card"><div class="sc-label">Claimed</div><div class="sc-val" style="color:${claimed?'#5ced73':'#f90'}">${claimed?'Yes':'No'}</div></div>`;
-  if (pubIp) html += `<div class="stat-card"><div class="sc-label">Public IP</div><div class="sc-val" style="color:#64b5f6;font-size:14px">${pubIp}:${pubPort}</div></div>`;
+  const dot = running ? 'green' : (daemonOn ? '#f90' : 'red');
+  const dotCls = running ? 'green' : (daemonOn ? '#f90' : 'red');
+  const statusText = running ? 'Running' : (claimed ? 'Daemon running, waiting for tunnel' : 'Not claimed');
+  html += `<div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" style="color:${running?'#5ced73':(claimed?'#f90':'#ff4444')}">${statusText}</div></div>`;
+  html += `<div class="stat-card"><div class="sc-label">Claimed</div><div class="sc-val" style="color:${claimed?'#5ced73':'#ff4444'}">${claimed?'Yes':'No'}</div></div>`;
+  if (d.public_ip) html += `<div class="stat-card"><div class="sc-label">Public IP</div><div class="sc-val" style="color:#64b5f6;font-size:14px">${d.public_ip}:${d.public_port}</div></div>`;
   if (d.version) html += `<div class="stat-card"><div class="sc-label">Version</div><div class="sc-val" style="font-size:14px;color:#888">${d.version}</div></div>`;
   html += '</div>';
   html += '<div class="server-actions">';
-  if (!claimed) html += `<button class="btn btn-cmd" onclick="startPlayit()">Start Tunnel & Get Claim URL</button>`;
-  if (running) html += `<span style="font-size:13px;color:#888;padding:8px">Tunnel is active — your server is online!</span>`;
+  if (!claimed) html += `<button class="btn btn-cmd" onclick="claimPlayit()">Claim Tunnel (get link)</button>`;
+  if (claimed && !running) html += `<button class="btn btn-start" onclick="startDaemon()">Start Daemon</button>`;
+  if (running) html += `<span style="font-size:13px;color:#5ced73;padding:8px">Tunnel active — server is online!</span>`;
   html += `<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>`;
   html += '</div>';
-  html += '<div id="playitOutput" style="font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap"></div>';
+  html += '<div id="playitOutput"></div>';
   c.innerHTML = html;
   updateTunnelDashboard(d);
 }
 
-async function installPlayit() {
-  const c = $('tunnelContent');
-  c.innerHTML = '<div class="search-status">Installing Playit.gg (this may take a moment)...</div>';
-  const r = await fetch('/api/playit/install', {method:'POST'});
-  const d = await r.json();
-  if (d.ok && d.installed) { toast('Playit installed!', 'success'); loadTunnel(); }
-  else toast('Install failed — try manually: pkg install tur-repo && pkg install playit', 'error');
-}
-
-async function startPlayit() {
-  const outDiv = $('playitOutput') || document.createElement('div');
-  if (!outDiv.id) { outDiv.id = 'playitOutput'; outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap'; $('tunnelContent').appendChild(outDiv); }
-  outDiv.textContent = 'Starting tunnel (this may take a minute)...';
+async function claimPlayit() {
+  const outDiv = $('playitOutput');
+  if (!outDiv) return;
+  outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap';
+  outDiv.textContent = 'Getting claim URL...';
   try {
     const ac = new AbortController();
     const timeout = setTimeout(() => ac.abort(), 40000);
@@ -1251,26 +1244,42 @@ async function startPlayit() {
     if (!d.ok) { outDiv.textContent = d.error || 'Failed.'; return; }
     if (d.claim) {
       outDiv.innerHTML = `
-        <p style="color:#5ced73;margin-bottom:8px">Tunnel started! Claim it at:</p>
-        <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px">${d.claim}</a>
-        <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions.</p>
-        <p style="color:#888">After claiming, refresh this page to see your tunnel info.</p>`;
-    } else if (d.ip) {
-      outDiv.textContent = `Tunnel ready! Public: ${d.ip}:${d.port}`;
-      loadTunnel();
+        <p style="color:#5ced73;margin-bottom:8px">Claim URL generated!</p>
+        <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px;word-break:break-all">${d.claim}</a>
+        <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions to claim your tunnel.</p>
+        <p style="color:#888">After claiming, click <b>Start Daemon</b> below to run the tunnel.</p>`;
     } else if (d.lines && d.lines.length) {
-      outDiv.textContent = d.message || 'Output captured:';
-      outDiv.textContent += '\n' + d.lines.slice(-20).join('\n');
-      if (d.raw) outDiv.textContent += '\n\n[Full output]\n' + d.raw;
+      outDiv.textContent = (d.lines || []).join('\n') + '\n\n' + (d.message || '');
     } else {
-      outDiv.textContent = d.message || 'Tunnel started. Check the page for status.';
-    }
-    if (d.lines && d.lines.length) {
-      outDiv.textContent += '\n\nOutput:\n' + d.lines.join('\n');
+      outDiv.textContent = d.message || 'Check the page for status.';
     }
   } catch(e) {
-    $('playitOutput').textContent = 'Request timed out or failed. Try again.';
+    outDiv.textContent = 'Request timed out. Try again.';
   }
+}
+
+async function startDaemon() {
+  const outDiv = $('playitOutput');
+  if (!outDiv) return;
+  outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap';
+  outDiv.textContent = 'Starting daemon...';
+  try {
+    const r = await fetch('/api/playit/daemon', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) { outDiv.textContent = 'Daemon started. Refresh to check status.'; setTimeout(loadTunnel, 2000); }
+    else outDiv.textContent = d.error || 'Failed.';
+  } catch(e) {
+    outDiv.textContent = 'Request failed.';
+  }
+}
+
+async function installPlayit() {
+  const c = $('tunnelContent');
+  c.innerHTML = '<div class="search-status">Installing Playit.gg (this may take a moment)...</div>';
+  const r = await fetch('/api/playit/install', {method:'POST'});
+  const d = await r.json();
+  if (d.ok && d.installed) { toast('Playit installed!', 'success'); loadTunnel(); }
+  else toast('Install failed — try manually: pkg install tur-repo && pkg install playit', 'error');
 }
 
 function updateTunnelDashboard(d) {
