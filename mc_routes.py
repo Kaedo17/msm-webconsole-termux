@@ -208,6 +208,26 @@ def register_routes(app, html):
         except Exception as e:
             return fail(f"Upload failed: {e}")
 
+    @app.route("/api/file/delete", methods=["POST"])
+    def api_file_delete():
+        data = parse_json_body()
+        target = safe_resolve(data.get("path", ""))
+        if target is None:
+            return fail("Access denied.")
+        if not target.exists():
+            return fail("File or folder not found.")
+        if target == mc_state.SERVER_DIR.resolve():
+            return fail("Cannot delete the server root directory.")
+        try:
+            if target.is_dir():
+                import shutil
+                shutil.rmtree(str(target))
+            else:
+                target.unlink()
+            return ok({"message": f"Deleted {target.name}"})
+        except Exception as e:
+            return fail(f"Delete failed: {e}")
+
     # ═══════════════════════════════════════════════════════════════════
     #  BACKUPS
     # ═══════════════════════════════════════════════════════════════════
@@ -342,9 +362,12 @@ def register_routes(app, html):
         dest = dest_dir / filename
         try:
             modrinth_download(file_url, dest)
+            return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(mc_state.SERVER_DIR))})
         except Exception as e:
-            return fail(f"Download failed: {e}")
-        return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(mc_state.SERVER_DIR))})
+            err = str(e)
+            if "403" in err or "Forbidden" in err:
+                return jsonify({"ok": False, "error": "blocked", "url": file_url, "filename": filename}), 200
+            return fail(f"Download failed: {err}")
 
     @app.route("/api/packs/installed")
     def api_packs_installed():

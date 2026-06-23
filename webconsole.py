@@ -102,6 +102,9 @@ HTML = r"""<!DOCTYPE html>
   .file-tree .fi.folder{color:#fdd835}
   .file-tree .fi.file{color:#90caf9}
   .file-tree .fi.active{background:#1e2a1e;color:#5ced73}
+  .file-tree .fi-del{float:right;color:#555;cursor:pointer;font-size:11px;padding:0 4px;border-radius:3px;opacity:0;transition:.15s}
+  .file-tree .fi:hover .fi-del{opacity:1}
+  .file-tree .fi-del:hover{color:#ff4444;background:#2a1a1a}
   .file-editor{flex:1;display:flex;flex-direction:column}
   .file-editor .fe-header{padding:8px 16px;background:#151515;border-bottom:1px solid #2a2a2a;font-size:13px;color:#888;display:flex;justify-content:space-between;align-items:center}
   .file-editor textarea{flex:1;background:#0d0d0d;border:none;color:#e0e0e0;font-family:monospace;font-size:13px;padding:12px 16px;resize:none;outline:none;tab-size:2}
@@ -704,16 +707,14 @@ async function showVersions(projectId, title, packType, provider) {
 
 async function installPack(fileUrl, filename, packType) {
   closeModal('versionModal');
-  if (!fileUrl || fileUrl.includes('curseforge.com')) {
-    window.open(fileUrl, '_blank');
-    toast('Opening download in browser...', 'info');
-    return;
-  }
   toast('Installing...', 'info');
   const d = await api('packs/install', {file_url: fileUrl, filename, type: packType});
   if (d.ok) {
     toast(`Installed ${filename}`, 'success');
     loadInstalledPacks();
+  } else if (d.error === 'blocked') {
+    toast('CurseForge blocked server download, opening browser...', 'info');
+    window.open(d.url || fileUrl, '_blank');
   }
 }
 
@@ -822,7 +823,8 @@ async function loadFileTree(path) {
     const icon = item.is_dir ? '' : '';
     const cls = item.is_dir ? 'folder' : 'file';
     const click = item.is_dir ? `loadFileTree('${item.path}')` : `openFile('${item.path}')`;
-    html.push(`<div class="fi ${cls}" onclick="${click}">${icon} ${item.name}</div>`);
+    const del = `<span class="fi-del" onclick="event.stopPropagation();deleteFile('${item.path}',${item.is_dir})" title="Delete">&#x2715;</span>`;
+    html.push(`<div class="fi ${cls}" onclick="${click}">${icon} ${item.name}${del}</div>`);
   }
   html.push('</div><div class="file-editor" id="fileEditor"><div class="fe-header">Select a file to edit</div></div></div>');
   $('fileBrowser').innerHTML = html.join('');
@@ -851,6 +853,16 @@ async function saveFile() {
   if (!currentFilePath) return;
   const d = await api('file/save', {path: currentFilePath, content});
   if (d.ok) toast('File saved!', 'success');
+}
+
+async function deleteFile(path, isDir) {
+  const label = isDir ? 'folder and all contents' : 'file';
+  if (!confirm(`Delete ${label}?\n${path}`)) return;
+  const d = await api('file/delete', {path});
+  if (d.ok) {
+    toast(`Deleted`, 'success');
+    loadFileTree(_fileUploadDest);
+  }
 }
 
 let _fileUploadDest = '';
