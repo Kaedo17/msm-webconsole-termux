@@ -1238,19 +1238,51 @@ async function startDaemon() {
   const outDiv = $('playitOutput');
   if (!outDiv) return;
   outDiv.style.cssText = 'font-size:13px;color:#ccc;margin-top:12px;padding:12px;border-radius:6px;background:#0a0a0a';
-  outDiv.textContent = 'Starting daemon...';
+  outDiv.innerHTML = '<p style="color:#ccc">Starting daemon...</p>';
+
   try {
     const r = await fetch('/api/playit/daemon', {method:'POST'});
     const d = await r.json();
-    if (d.ok) {
-      outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
-        + '<p style="color:#ccc;font-size:13px">Reloading page...</p>';
-      loadTunnel();
+    if (!d.ok) {
+      outDiv.innerHTML = '<p style="color:#ff4444">' + escapeHtml(d.error || 'Failed to start daemon.') + '</p>';
+      return;
+    }
+
+    outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started! Running playit-cli...</p>';
+
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 40000);
+    const r2 = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
+    clearTimeout(timeout);
+    const d2 = await r2.json();
+
+    if (!d2.ok) {
+      outDiv.innerHTML = '<p style="color:#ff4444;margin-bottom:4px">Daemon started, but playit-cli failed:</p>'
+        + '<pre style="font-size:11px;color:#666;white-space:pre-wrap;margin:0">' + escapeHtml(d2.error || 'Unknown error') + '</pre>';
+      return;
+    }
+
+    if (d2.claim_url && d2.claim_code) {
+      outDiv.innerHTML = ''
+        + '<p style="color:#5ced73;margin-bottom:8px">&#10003; Daemon running! Claim your tunnel:</p>'
+        + '<p style="margin-bottom:8px"><a href="' + d2.claim_url + '" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; Open ' + d2.claim_url + '</a></p>'
+        + '<p style="color:#888;font-size:13px;margin-bottom:4px">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">' + escapeHtml(d2.claim_code) + '</code></p>'
+        + '<p style="color:#666;font-size:12px">Open the link above or go to playit.gg/claim and enter the code.</p>';
+    } else if (d2.claimed) {
+      outDiv.innerHTML = '<p style="color:#5ced73">&#10003; Daemon running! Tunnel is already claimed and active.</p>';
+      setTimeout(loadTunnel, 2000);
     } else {
-      outDiv.textContent = d.error || 'Failed.';
+      let html = '<p style="color:#f90;margin-bottom:6px">Daemon started, but no claim URL was found.</p>';
+      html += '<p style="color:#ccc;font-size:12px;margin-bottom:6px">playit-cli output:</p>';
+      if (d2.lines && d2.lines.length) {
+        html += '<pre style="font-size:11px;color:#888;white-space:pre-wrap;margin:0;max-height:200px;overflow-y:auto">';
+        for (const l of d2.lines.slice(-20)) html += escapeHtml(l) + '\n';
+        html += '</pre>';
+      }
+      outDiv.innerHTML = html;
     }
   } catch(e) {
-    outDiv.textContent = 'Request failed.';
+    outDiv.innerHTML = '<p style="color:#ff4444">Request failed or timed out.</p>';
   }
 }
 

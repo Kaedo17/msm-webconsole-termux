@@ -43,7 +43,7 @@ def start_daemon():
         return True, "Daemon already running"
     try:
         subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-        time.sleep(2)
+        time.sleep(3)
         return True, "Daemon started"
     except Exception as e:
         return False, str(e)
