@@ -1244,7 +1244,10 @@ async function startDaemon() {
     const r = await fetch('/api/playit/daemon', {method:'POST'});
     const d = await r.json();
     if (d.ok) {
-      outDiv.innerHTML = '<p style="color:#5ced73">Daemon started!</p><p style="color:#888;margin-top:4px;font-size:12px">Now run the command shown above in Termux to get your claim code.</p>';
+      outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
+        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Run this in a <b>new</b> Termux session to get your claim code:</p>'
+        + '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:8px">playit-cli</code>'
+        + '<p style="color:#888;font-size:12px">Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a> and enter the code shown in the output.</p>';
       setTimeout(loadTunnel, 2000);
     } else {
       outDiv.textContent = d.error || 'Failed.';
