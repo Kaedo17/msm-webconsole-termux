@@ -1208,71 +1208,45 @@ async function loadTunnel() {
     return;
   }
   const claimed = d.claimed;
-  const running = d.running;
   const daemonOn = d.daemon_running;
+  const running = d.running;
   let html = '<div class="status-grid">';
-  const dot = running ? 'green' : (daemonOn ? '#f90' : 'red');
-  const dotCls = running ? 'green' : (daemonOn ? '#f90' : 'red');
-  const statusText = running ? 'Running' : (claimed ? 'Daemon running, waiting for tunnel' : 'Not claimed');
-  html += `<div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" style="color:${running?'#5ced73':(claimed?'#f90':'#ff4444')}">${statusText}</div></div>`;
-  html += `<div class="stat-card"><div class="sc-label">Claimed</div><div class="sc-val" style="color:${claimed?'#5ced73':'#ff4444'}">${claimed?'Yes':'No'}</div></div>`;
+  const statusColor = running ? '#5ced73' : (daemonOn ? '#f90' : '#ff4444');
+  const statusText = running ? 'Online' : (daemonOn ? 'Daemon Running' : 'Stopped');
+  html += `<div class="stat-card"><div class="sc-label">Tunnel</div><div class="sc-val" style="color:${statusColor}">${statusText}</div></div>`;
+  html += `<div class="stat-card"><div class="sc-label">Account</div><div class="sc-val" style="color:${claimed?'#5ced73':'#f90'}">${claimed?'Claimed':'Not Claimed'}</div></div>`;
   if (d.public_ip) html += `<div class="stat-card"><div class="sc-label">Public IP</div><div class="sc-val" style="color:#64b5f6;font-size:14px">${d.public_ip}:${d.public_port}</div></div>`;
   if (d.version) html += `<div class="stat-card"><div class="sc-label">Version</div><div class="sc-val" style="font-size:14px;color:#888">${d.version}</div></div>`;
   html += '</div>';
   html += '<div class="server-actions">';
-  if (!claimed) html += `<button class="btn btn-cmd" onclick="claimPlayit()">Claim Tunnel (get link)</button>`;
-  if (claimed && !running) html += `<button class="btn btn-start" onclick="startDaemon()">Start Daemon</button>`;
-  if (running) html += `<span style="font-size:13px;color:#5ced73;padding:8px">Tunnel active — server is online!</span>`;
+  if (!daemonOn) html += `<button class="btn btn-start" onclick="startDaemon()">Start Daemon</button>`;
+  if (daemonOn && !claimed) html += `<a href="https://playit.gg/claim" target="_blank" class="btn btn-cmd" style="text-decoration:none">&#x2197; Claim on playit.gg</a>`;
   html += `<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>`;
   html += '</div>';
+  if (!claimed && daemonOn) {
+    html += '<div style="padding:16px;background:#1a2a1a;border:1px solid #2a2a2a;border-radius:8px;margin-top:12px">';
+    html += '<p style="color:#ccc;margin-bottom:8px"><b>How to claim:</b></p>';
+    html += '<ol style="color:#888;font-size:13px;margin-left:18px;line-height:1.6">';
+    html += '<li>Click <b>Claim on playit.gg</b> above</li>';
+    html += '<li>Log in or create an account</li>';
+    html += '<li>Your agent should appear — click <b>Claim</b></li>';
+    html += '<li>Come back here and click <b>Refresh</b></li>';
+    html += '</ol></div>';
+  }
   html += '<div id="playitOutput"></div>';
   c.innerHTML = html;
   updateTunnelDashboard(d);
 }
 
-async function claimPlayit() {
-  const outDiv = $('playitOutput');
-  if (!outDiv) return;
-  outDiv.style.cssText = 'font-size:13px;color:#ccc;margin-top:12px;white-space:pre-wrap;word-break:break-all;background:#0a0a0a;padding:12px;border-radius:6px;max-height:400px;overflow-y:auto';
-  outDiv.textContent = 'Getting claim URL... (may take up to 30s)';
-  try {
-    const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 45000);
-    const r = await fetch('/api/playit/start', {method:'POST', signal: ac.signal});
-    clearTimeout(timeout);
-    const d = await r.json();
-    if (!d.ok) { outDiv.textContent = d.error || 'Failed.'; return; }
-    let html = '';
-    if (d.claim) {
-      html = `
-        <p style="color:#5ced73;margin-bottom:8px">Claim URL generated!</p>
-        <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px;word-break:break-all">${d.claim}</a>
-        <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions to claim your tunnel.</p>
-        <p style="color:#888">After claiming, come back here and click <b>Start Daemon</b>.</p>`;
-    } else {
-      html = `<p style="color:#f90;margin-bottom:8px">${d.message || 'Could not find claim URL automatically.'}</p>
-        <p style="margin-top:12px;margin-bottom:12px"><a href="https://playit.gg/claim" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block">&#x2197; Open playit.gg to claim manually</a></p>`;
-    }
-    if (d.lines && d.lines.length) {
-      html += '<div style="font-size:12px;color:#888;margin-top:8px;margin-bottom:4px">Raw output:</div><pre style="font-size:11px;color:#aaa;margin:0;white-space:pre-wrap;word-break:break-all">';
-      for (const line of d.lines) html += escapeHtml(line) + '\n';
-      html += '</pre>';
-    }
-    outDiv.innerHTML = html;
-  } catch(e) {
-    outDiv.textContent = 'Request timed out. Try again.';
-  }
-}
-
 async function startDaemon() {
   const outDiv = $('playitOutput');
   if (!outDiv) return;
-  outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap';
+  outDiv.style.cssText = 'font-size:13px;color:#ccc;margin-top:12px;padding:12px;border-radius:6px;background:#0a0a0a';
   outDiv.textContent = 'Starting daemon...';
   try {
     const r = await fetch('/api/playit/daemon', {method:'POST'});
     const d = await r.json();
-    if (d.ok) { outDiv.textContent = 'Daemon started. Refresh to check status.'; setTimeout(loadTunnel, 2000); }
+    if (d.ok) { outDiv.textContent = 'Daemon started! Open playit.gg to claim your tunnel.'; setTimeout(loadTunnel, 3000); }
     else outDiv.textContent = d.error || 'Failed.';
   } catch(e) {
     outDiv.textContent = 'Request failed.';

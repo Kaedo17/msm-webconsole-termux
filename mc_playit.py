@@ -91,28 +91,22 @@ def start_tunnel(timeout=30):
     if not is_installed():
         return False, {"error": "Playit not installed"}
 
-    # Ensure daemon runs (capture output in case claim URL appears there)
+    # Already claimed — just ensure daemon runs
     if is_claimed():
         if _PLAYITD:
             subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-        return True, {"message": "Already claimed. Tunnel should be running."}
+        return True, {"message": "Already claimed."}
 
     all_raw = []
-    claim_url = None
 
-    # Step 1: Start playitd — daemon generates the secret + claim URL
+    # Step 1: Start playitd as background daemon (don't kill it)
     if _PLAYITD:
-        ok, out, lines = _capture_output([_PLAYITD], timeout=10)
-        all_raw.append(("playitd", out, lines))
-        claim_url = _find_claim_url(lines)
-        if claim_url:
-            return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
-        # Keep daemon running — it's needed for playit-cli
         subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-    else:
-        all_raw.append(("playitd", "", ["playitd not found"]))
+        # Wait for daemon to initialize before connecting client
+        time.sleep(3)
+        all_raw.append(("playitd", "", ["started in background"]))
 
-    # Step 2: Try playit-cli (connects to the now-running daemon)
+    # Step 2: Run playit-cli against the running daemon
     if _PLAYIT_CLI:
         ok, out, lines = _capture_output([_PLAYIT_CLI], timeout=timeout)
         all_raw.append(("playit-cli", out, lines))
@@ -120,7 +114,7 @@ def start_tunnel(timeout=30):
         if claim_url:
             return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    # Step 3: Try main 'playit' binary as last resort
+    # Step 3: Try 'playit' as fallback
     if _PLAYIT:
         ok, out, lines = _capture_output([_PLAYIT], timeout=10)
         all_raw.append(("playit", out, lines))
@@ -128,7 +122,7 @@ def start_tunnel(timeout=30):
         if claim_url:
             return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    # No claim URL — return everything
+    # Return everything — claim at playit.gg/claim
     formatted = []
     for name, out, lines in all_raw:
         formatted.append(f">>> {name} ({len(lines)} lines)")
@@ -137,7 +131,7 @@ def start_tunnel(timeout=30):
     return True, {
         "lines": formatted,
         "raw": "\n".join(f">>> {n}\n{o}" for n, o, _ in all_raw),
-        "message": "Could not auto-detect claim URL. Use the manual link below.",
+        "message": "Daemon started. Claim it on playit.gg website.",
     }
 
 
