@@ -359,6 +359,12 @@ HTML = r"""<!DOCTYPE html>
       <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="text" id="csMinRam" value="512M" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
       <div style="flex:1"><label style="font-size:13px;color:#888">Max RAM</label><input type="text" id="csMaxRam" value="2G" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
     </div>
+    <div style="display:flex;align-items:center;margin-top:10px">
+      <input type="checkbox" id="csEula" style="margin-right:6px;width:auto">
+      <label style="font-size:13px;color:#888">I accept the <a href="https://minecraft.net/eula" target="_blank" style="color:#5ced73">Minecraft EULA</a></label>
+    </div>
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">World Seed <span style="color:#666">(optional)</span></label>
+    <input type="text" id="csSeed" placeholder="Leave blank for random" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
       <button class="btn btn-start" id="csCreateBtn" onclick="doCreateServer()">Create & Download</button>
@@ -751,10 +757,14 @@ async function doCreateServer() {
   const forgeVer = $('csForgeVersion')?.value || '';
   const minRam = $('csMinRam').value.trim().toUpperCase();
   const maxRam = $('csMaxRam').value.trim().toUpperCase();
+  if ($('csEula') && !$('csEula').checked) { toast('You must accept the EULA', 'error'); return; }
   closeModal('createServerModal');
   const body = {name, jar_type: jt, min_ram: minRam, max_ram: maxRam};
   if (mcVer) body.mc_version = mcVer;
   if (forgeVer && jt === 'forge') body.forge_version = forgeVer;
+  body.eula = true;
+  const seed = $('csSeed')?.value.trim();
+  if (seed) body.level_seed = seed;
   const d = await api('servers', body);
   if (d.ok) { loadServers(); toast(`Server '${name}' created!`, 'success'); }
 }

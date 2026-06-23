@@ -53,6 +53,15 @@ def register_routes(app, html):
         if not re.match(r"^\d+[MG]$", mr) or not re.match(r"^\d+[MG]$", mx):
             return fail("Invalid RAM format.")
         inst = mci.create_server(name, jt, mr, mx)
+        if data.get("eula"):
+            (inst.dir / "eula.txt").write_text("eula=true\n")
+        seed = data.get("level_seed", "")
+        if seed:
+            props_path = inst.dir / "server.properties"
+            if props_path.exists():
+                save_props(inst.dir, {"level-seed": seed})
+            else:
+                props_path.write_text(f"level-seed={seed}\n")
         mc_ver = data.get("mc_version", "")
         if mc_ver:
             forge_ver = data.get("forge_version", "")
