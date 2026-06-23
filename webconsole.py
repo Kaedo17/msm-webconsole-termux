@@ -1291,6 +1291,8 @@ async function runPlayitCli() {
   btn.disabled = false;
   btn.textContent = 'Run playit-cli';
 }
+
+async function installPlayit() {
   const c = $('tunnelContent');
   c.innerHTML = '<div class="search-status">Installing Playit.gg (this may take a moment)...</div>';
   const r = await fetch('/api/playit/install', {method:'POST'});
