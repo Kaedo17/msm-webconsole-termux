@@ -423,7 +423,7 @@ async function api(method, body) {
 }
 
 async function get(path) {
-  const globalPaths = ['/api/servers', '/api/versions'];
+  const globalPaths = ['/api/servers', '/api/versions', '/api/playit'];
   const isGlobal = globalPaths.some(p => path.startsWith(p));
   if (path.startsWith('/api/') && !isGlobal && _currentServer) {
     path = `/api/servers/${_currentServer}/${path.replace('/api/', '')}`;

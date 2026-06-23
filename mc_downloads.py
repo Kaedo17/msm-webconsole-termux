@@ -45,7 +45,7 @@ def get_minecraft_versions():
         for v in manifest.get("versions", []):
             if v.get("type") == "release":
                 versions.append(v["id"])
-        return sorted(versions, key=lambda x: [int(p) for p in x.split(".")])
+        return sorted(versions, key=lambda x: [int(p) for p in x.split(".")], reverse=True)
     except Exception as e:
         return []
 
