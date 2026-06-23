@@ -1244,8 +1244,8 @@ async function startDaemon() {
     const d = await r.json();
     if (d.ok) {
       outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
-        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Now click the <b>Run playit-cli</b> button above to get your claim code.</p>';
-    } else {
+        + '<p style="color:#ccc;font-size:13px">Reloading page...</p>';
+      loadTunnel(); else {
       outDiv.textContent = d.error || 'Failed.';
     }
   } catch(e) {
