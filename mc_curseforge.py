@@ -20,7 +20,23 @@ CF_CATEGORIES = {
     "modpack": "modpacks",
     "mod": "mc-mods",
     "resourcepack": "texture-packs",
+    "datapack": "data-packs",
+    "shader": "shaders",
+    "plugin": "bukkit-plugins",
 }
+
+CF_BASE_PATHS = {
+    "modpack": "/minecraft/modpacks",
+    "mod": "/minecraft/mc-mods",
+    "resourcepack": "/minecraft/texture-packs",
+    "datapack": "/minecraft/data-packs",
+    "shader": "/minecraft/shaders",
+    "plugin": "/bukkit-plugins",
+}
+
+
+def _cf_base_path(project_type):
+    return CF_BASE_PATHS.get(project_type, "/minecraft/mc-mods")
 
 
 def _cf_get_html(url, timeout=20):
@@ -49,12 +65,16 @@ def curseforge_search(query, project_type="mod", limit=20):
     """Search CurseForge by scraping the search results page."""
     try:
         cat = _category_path(project_type)
-        url = f"{CF_BASE}/minecraft/{cat}/search?search={urllib.parse.quote(query)}"
+        base_path = _cf_base_path(project_type)
+        if project_type == "plugin":
+            url = f"{CF_BASE}{base_path}?search={urllib.parse.quote(query)}"
+        else:
+            url = f"{CF_BASE}{base_path}/search?search={urllib.parse.quote(query)}"
         html = _cf_get_html(url)
 
         slugs = []
         seen = set()
-        for m in re.finditer(rf'/minecraft/{re.escape(cat)}/([a-zA-Z0-9_-]+)', html):
+        for m in re.finditer(rf'{re.escape(base_path)}/([a-zA-Z0-9_-]+)', html):
             slug = m.group(1)
             if slug in seen or slug in ("search", "files", "download"):
                 continue
@@ -72,14 +92,15 @@ def curseforge_search(query, project_type="mod", limit=20):
 
 
 def _get_project_summary(slug, cat, project_type, search_html=""):
-    base = f"{CF_BASE}/minecraft/{cat}/{slug}"
+    base_path = _cf_base_path(project_type)
+    base = f"{CF_BASE}{base_path}/{slug}"
     title = slug.replace("-", " ").title()
     desc = ""
     icon = ""
 
     if search_html:
         m_title = re.search(
-            rf'href="/minecraft/{re.escape(cat)}/{re.escape(slug)}"[^>]*>.*?>([^<]+)<',
+            rf'href="{re.escape(base_path)}/{re.escape(slug)}"[^>]*>.*?>([^<]+)<',
             search_html, re.DOTALL
         )
         if m_title:
@@ -140,7 +161,8 @@ def curseforge_versions(project_id, project_type="mod", limit=20):
     """Parse available files from the project page's Next.js SSR data."""
     try:
         cat = _category_path(project_type)
-        url = f"{CF_BASE}/minecraft/{cat}/{project_id}"
+        base_path = _cf_base_path(project_type)
+        url = f"{CF_BASE}{base_path}/{project_id}"
         try:
             html = _cf_get_html(url)
         except Exception:
@@ -148,7 +170,7 @@ def curseforge_versions(project_id, project_type="mod", limit=20):
 
         nd = _parse_next_data(html)
 
-        file_ids = re.findall(rf'/minecraft/{re.escape(cat)}/[a-z0-9_-]+/files/(\d+)', html)
+        file_ids = re.findall(rf'{re.escape(base_path)}/[a-z0-9_-]+/files/(\d+)', html)
         file_names = re.findall(r'"fileName":"([^"]*)"', nd)
         game_vers = re.findall(r'"gameVersions":\[([^\]]*)\]', nd)
 
@@ -161,7 +183,7 @@ def curseforge_versions(project_id, project_type="mod", limit=20):
             gv_raw = game_vers[i] if i < len(game_vers) else ""
             gv = [v.strip('"') for v in gv_raw.split(",") if v.strip()]
 
-            page_url = f"{CF_BASE}/minecraft/{cat}/{project_id}/download/{fid}" if fid else ""
+            page_url = f"{CF_BASE}{base_path}/{project_id}/download/{fid}" if fid else ""
 
             versions.append({
                 "id": fid or fname,

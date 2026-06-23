@@ -250,9 +250,17 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div id="packBrowse">
         <div class="pack-search-bar">
-          <input type="text" id="packSearchInput" placeholder="Search modpacks & mods..." onkeydown="if(event.key==='Enter')searchPacks()">
-          <select id="packProviderSelect" onchange="searchPacks()"><option value="modrinth">Modrinth</option><option value="curseforge">CurseForge</option></select>
-          <select id="packTypeSelect" onchange="searchPacks()"><option value="modpack">Modpacks</option><option value="mod">Mods</option><option value="resourcepack">Resource Packs</option></select>
+          <input type="text" id="packSearchInput" placeholder="Search mods, packs & plugins..." onkeydown="if(event.key==='Enter')searchPacks()">
+          <select id="packProviderSelect" onchange="onProviderChange()"><option value="modrinth">Modrinth</option><option value="curseforge">CurseForge</option></select>
+          <select id="packTypeSelect" onchange="searchPacks(true)">
+            <option value="modpack">Modpacks</option>
+            <option value="mod">Mods</option>
+            <option value="resourcepack">Resource Packs</option>
+            <option value="datapack">Data Packs</option>
+            <option value="shader">Shaders</option>
+            <option value="plugin">Plugins</option>
+            <option value="server">Servers</option>
+          </select>
           <button class="btn btn-cmd" onclick="searchPacks()">Search</button>
           <button class="btn btn-secondary" onclick="searchPacks()" title="Refresh results">&#x21bb;</button>
         </div>
@@ -260,8 +268,13 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div id="packInstalled" style="display:none">
         <div class="server-actions">
+          <button class="btn btn-cmd" onclick="openUploadModal('mod')">Import Mod</button>
           <button class="btn btn-cmd" onclick="openUploadModal('modpack')">Import Modpack</button>
           <button class="btn btn-cmd" onclick="openUploadModal('resourcepack')">Import Resource Pack</button>
+          <button class="btn btn-cmd" onclick="openUploadModal('datapack')">Import Data Pack</button>
+          <button class="btn btn-cmd" onclick="openUploadModal('shader')">Import Shader</button>
+          <button class="btn btn-cmd" onclick="openUploadModal('plugin')">Import Plugin</button>
+          <button class="btn btn-cmd" onclick="openUploadModal('server')">Import Server Jar</button>
         </div>
         <div id="packInstalledList"></div>
       </div>
@@ -469,9 +482,9 @@ let _uploadPending = [];
 function openUploadModal(mode) {
   _uploadMode = mode;
   _uploadPending = [];
-  const titles = {file:'Upload File', modpack:'Import Modpack', resourcepack:'Import Resource Pack', mod:'Import Mod'};
-  const accepts = {file:'', modpack:'.zip,.jar', resourcepack:'.zip', mod:'.jar,.litemod'};
-  const dests = {file:'current directory', modpack:'mods/', resourcepack:'resourcepacks/', mod:'mods/'};
+  const titles = {file:'Upload File', modpack:'Import Modpack', resourcepack:'Import Resource Pack', mod:'Import Mod', datapack:'Import Data Pack', shader:'Import Shader', plugin:'Import Plugin', server:'Import Server Jar'};
+  const accepts = {file:'', modpack:'.zip,.jar', resourcepack:'.zip', mod:'.jar,.litemod', datapack:'.zip', shader:'.zip', plugin:'.jar', server:'.jar'};
+  const dests = {file:'current directory', modpack:'mods/', resourcepack:'resourcepacks/', mod:'mods/', datapack:'datapacks/', shader:'shaderpacks/', plugin:'plugins/', server:'server root/'};
   $('uploadModalTitle').textContent = titles[mode] || 'Upload';
   $('uploadDestHint').textContent = `Destination: ${dests[mode] || ''}`;
   $('uploadFileList').innerHTML = '';
@@ -509,9 +522,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function _getUploadDest(filename) {
   const name = filename.toLowerCase();
-  if (_uploadMode === 'modpack') return 'mods';
+  if (_uploadMode === 'modpack' || _uploadMode === 'mod') return 'mods';
   if (_uploadMode === 'resourcepack') return 'resourcepacks';
-  if (_uploadMode === 'mod') return 'mods';
+  if (_uploadMode === 'datapack') return 'datapacks';
+  if (_uploadMode === 'shader') return 'shaderpacks';
+  if (_uploadMode === 'plugin') return 'plugins';
+  if (_uploadMode === 'server') return '.';
   return _fileUploadDest;
 }
 
@@ -913,6 +929,36 @@ async function saveProperties() {
   }
 }
 
+const PACK_TYPES = [
+  { value:'modpack', label:'Modpacks', providers:['modrinth','curseforge'] },
+  { value:'mod', label:'Mods', providers:['modrinth','curseforge'] },
+  { value:'resourcepack', label:'Resource Packs', providers:['modrinth','curseforge'] },
+  { value:'datapack', label:'Data Packs', providers:['modrinth','curseforge'] },
+  { value:'shader', label:'Shaders', providers:['modrinth','curseforge'] },
+  { value:'plugin', label:'Plugins', providers:['modrinth','curseforge'] },
+  { value:'server', label:'Servers', providers:['modrinth'] },
+];
+
+function updatePackTypes(provider) {
+  const sel = $('packTypeSelect');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  for (const t of PACK_TYPES) {
+    if (t.providers.includes(provider)) {
+      const opt = document.createElement('option');
+      opt.value = t.value;
+      opt.textContent = t.label;
+      sel.appendChild(opt);
+    }
+  }
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+
+function onProviderChange() {
+  updatePackTypes($('packProviderSelect').value);
+  searchPacks(true);
+}
+
 // ── Modpacks / Resource Packs ──
 function showPackTab(tab) {
   $('packBrowse').style.display = tab === 'browse' ? 'block' : 'none';
@@ -1007,7 +1053,8 @@ async function loadInstalledPacks() {
   let html = '<div class="installed-list">';
   for (const p of d.packs) {
     const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' MB' : (p.size/1024).toFixed(0)+' KB';
-    const label = p.type === 'mod' ? 'Mod' : 'Resource Pack';
+    const typeLabels = {'mod':'Mod','resourcepack':'Resource Pack','datapack':'Data Pack','shader':'Shader','plugin':'Plugin','modpack':'Modpack','server':'Server'};
+    const label = typeLabels[p.type] || 'Mod';
     html += `<div class="installed-item">
       <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
       <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>

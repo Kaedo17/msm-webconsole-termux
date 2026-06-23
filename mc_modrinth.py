@@ -71,7 +71,13 @@ def modrinth_download(file_url, dest_path):
 
 def list_installed_packs(server_dir):
     result = []
-    for sub, pack_type in [("mods", "mod"), ("resourcepacks", "resourcepack")]:
+    for sub, pack_type in [
+        ("mods", "mod"),
+        ("resourcepacks", "resourcepack"),
+        ("datapacks", "datapack"),
+        ("shaderpacks", "shader"),
+        ("plugins", "plugin"),
+    ]:
         d = server_dir / sub
         if d.exists():
             for f in sorted(d.iterdir()):

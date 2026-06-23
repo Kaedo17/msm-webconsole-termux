@@ -460,7 +460,17 @@ def register_routes(app, html):
         pack_type = data.get("type", "modpack")
         if not file_url:
             return fail("No file URL provided.")
-        dest_dir = inst.dir / ("resourcepacks" if pack_type == "resourcepack" else "mods")
+        pack_dirs = {
+            "modpack": "mods",
+            "mod": "mods",
+            "resourcepack": "resourcepacks",
+            "datapack": "datapacks",
+            "shader": "shaderpacks",
+            "plugin": "plugins",
+            "server": ".",
+        }
+        dest_subdir = pack_dirs.get(pack_type, "mods")
+        dest_dir = inst.dir / dest_subdir
         dest = dest_dir / filename
         try:
             modrinth_download(file_url, dest)
