@@ -209,9 +209,8 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="page" id="page-files">
-      <div id="fileDropzone" class="dropzone">
-        Drag & drop files here to upload, or click to browse
-        <input type="file" id="fileInput" multiple>
+      <div class="server-actions">
+        <button class="btn btn-cmd" onclick="openUploadModal('file')">Upload File</button>
       </div>
       <div id="fileBrowser" class="loading">Loading files...</div>
     </div>
@@ -232,9 +231,9 @@ HTML = r"""<!DOCTYPE html>
         <div id="packResults"></div>
       </div>
       <div id="packInstalled" style="display:none">
-        <div class="dropzone" id="packDropzone" style="margin-bottom:16px">
-          Drag & drop .jar / .zip files to install as mods or resource packs
-          <input type="file" id="packInput" multiple accept=".jar,.zip,.litemod">
+        <div class="server-actions">
+          <button class="btn btn-cmd" onclick="openUploadModal('modpack')">Import Modpack</button>
+          <button class="btn btn-cmd" onclick="openUploadModal('resourcepack')">Import Resource Pack</button>
         </div>
         <div id="packInstalledList"></div>
       </div>
@@ -279,6 +278,21 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
+<div class="modal" id="uploadModal">
+  <div class="modal-box" style="min-width:420px">
+    <h3 id="uploadModalTitle">Upload</h3>
+    <div id="uploadDropzone" class="dropzone" style="margin:12px 0">
+      Drag & drop files here, or click to browse
+      <input type="file" id="uploadFileInput" multiple>
+    </div>
+    <div id="uploadFileList" style="max-height:150px;overflow-y:auto"></div>
+    <div id="uploadDestHint" style="font-size:12px;color:#666;margin:6px 0"></div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn btn-secondary" onclick="closeModal('uploadModal')">Cancel</button>
+      <button class="btn btn-save" id="uploadStartBtn" onclick="doUpload()">Upload</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -303,11 +317,11 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $(`page-${name}`).classList.add('active');
   if (name === 'console') setupConsole();
-  if (name === 'files') { initFileDropzone(); loadFileTree(); }
+  if (name === 'files') loadFileTree();
   if (name === 'backups') loadBackups();
   if (name === 'dashboard') loadDashboard();
   if (name === 'properties') loadProperties();
-  if (name === 'packs') { initPackDropzone(); loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
+  if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
 }
 
 // ── Toast ──
@@ -361,6 +375,75 @@ function initDropzone(zoneId, inputId, onFiles) {
     zone.classList.remove('dragover');
     if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
   });
+}
+
+let _uploadMode = 'file';
+let _uploadPending = [];
+
+function openUploadModal(mode) {
+  _uploadMode = mode;
+  _uploadPending = [];
+  const titles = {file:'Upload File', modpack:'Import Modpack', resourcepack:'Import Resource Pack', mod:'Import Mod'};
+  const accepts = {file:'', modpack:'.zip,.jar', resourcepack:'.zip', mod:'.jar,.litemod'};
+  const dests = {file:'current directory', modpack:'mods/', resourcepack:'resourcepacks/', mod:'mods/'};
+  $('uploadModalTitle').textContent = titles[mode] || 'Upload';
+  $('uploadDestHint').textContent = `Destination: ${dests[mode] || ''}`;
+  $('uploadFileList').innerHTML = '';
+  const inp = $('uploadFileInput');
+  inp.accept = accepts[mode] || '';
+  $('uploadModal').classList.add('show');
+}
+
+function renderUploadFileList() {
+  const c = $('uploadFileList');
+  if (!_uploadPending.length) { c.innerHTML = ''; return; }
+  let html = '';
+  for (let i = 0; i < _uploadPending.length; i++) {
+    const f = _uploadPending[i];
+    const sz = f.size >= 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#151515;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:4px">
+      <span style="font-size:13px">${escapeHtml(f.name)}</span>
+      <span style="font-size:12px;color:#888">${sz} <a href="#" onclick="removeUploadFile(${i});return false" style="color:#ff4444;margin-left:8px">remove</a></span>
+    </div>`;
+  }
+  c.innerHTML = html;
+}
+
+function removeUploadFile(i) {
+  _uploadPending.splice(i, 1);
+  renderUploadFileList();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initDropzone('uploadDropzone', 'uploadFileInput', (files) => {
+    for (const f of files) _uploadPending.push(f);
+    renderUploadFileList();
+  });
+});
+
+function _getUploadDest(filename) {
+  const name = filename.toLowerCase();
+  if (_uploadMode === 'modpack') return 'mods';
+  if (_uploadMode === 'resourcepack') return 'resourcepacks';
+  if (_uploadMode === 'mod') return 'mods';
+  return _fileUploadDest;
+}
+
+async function doUpload() {
+  if (!_uploadPending.length) { toast('No files selected', 'info'); return; }
+  const btn = $('uploadStartBtn');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  for (const f of _uploadPending) {
+    const dest = _getUploadDest(f.name);
+    await uploadFile(f, dest);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Upload';
+  _uploadPending = [];
+  closeModal('uploadModal');
+  if (_uploadMode === 'file') loadFileTree(_fileUploadDest);
+  else loadInstalledPacks();
 }
 
 // ── Status bar ──
@@ -655,23 +738,6 @@ async function loadInstalledPacks() {
 }
 
 function initPackDropzone() {
-  if (window._packDzInit) return;
-  window._packDzInit = true;
-  initDropzone('packDropzone', 'packInput', async (files) => {
-    for (const f of files) {
-      const name = f.name.toLowerCase();
-      let dest = '';
-      if (name.endsWith('.zip') && !name.includes('resource') && !name.includes('shader')) {
-        dest = 'mods';
-      } else if (name.endsWith('.jar') || name.endsWith('.litemod')) {
-        dest = 'mods';
-      } else {
-        dest = 'resourcepacks';
-      }
-      await uploadFile(f, dest);
-    }
-    loadInstalledPacks();
-  });
 }
 
 async function removePack(path, name) {
@@ -788,17 +854,6 @@ async function saveFile() {
 }
 
 let _fileUploadDest = '';
-
-function initFileDropzone() {
-  if (window._fileDzInit) return;
-  window._fileDzInit = true;
-  initDropzone('fileDropzone', 'fileInput', async (files) => {
-    for (const f of files) {
-      await uploadFile(f, _fileUploadDest);
-    }
-    loadFileTree(_fileUploadDest);
-  });
-}
 
 // ── Backups ──
 async function loadBackups() {
