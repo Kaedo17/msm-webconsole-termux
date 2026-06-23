@@ -399,6 +399,7 @@ function showPage(name) {
   if (name === 'servers') loadServers();
   if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
   if (name === 'tunnel') loadTunnel();
+  else stopTunnelPoll();
 }
 
 // ── Toast ──
@@ -1195,134 +1196,149 @@ async function restoreBackup(name) {
 }
 
 // ── Tunnel (Playit.gg) ──
+let _tunnelPoll = null;
+
 async function loadTunnel() {
-  const d = await get('/api/playit/status');
+  const d = await get('/api/playit/info');
   const c = $('tunnelContent');
-  if (!d.ok) { c.innerHTML = `<div class="search-status">Error loading tunnel status.</div>`; return; }
+  if (!d.ok) { c.innerHTML = '<div class="search-status">Error loading tunnel status.</div>'; return; }
   if (!d.installed) {
     c.innerHTML = `
       <div class="search-status" style="padding:24px">
         <p style="margin-bottom:12px">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
         <button class="btn btn-cmd" onclick="installPlayit()">Install Playit.gg</button>
       </div>`;
+    stopTunnelPoll();
     return;
   }
+  renderTunnelPage(d);
+  updateTunnelDashboard(d);
+  startTunnelPoll();
+}
+
+function renderTunnelPage(d) {
+  const c = $('tunnelContent');
   const claimed = d.claimed;
   const daemonOn = d.daemon_running;
   const running = d.running;
+  const logs = d.logs || [];
+  const tunnels = d.tunnels || [];
+  const claimUrl = d.claim_url;
+  const claimCode = d.claim_code;
+
   let html = '<div class="status-grid">';
   const statusColor = running ? '#5ced73' : (daemonOn ? '#f90' : '#ff4444');
   const statusText = running ? 'Online' : (daemonOn ? 'Daemon Running' : 'Stopped');
   html += `<div class="stat-card"><div class="sc-label">Tunnel</div><div class="sc-val" style="color:${statusColor}">${statusText}</div></div>`;
-  html += `<div class="stat-card"><div class="sc-label">Account</div><div class="sc-val" style="color:${claimed?'#5ced73':'#f90'}">${claimed?'Claimed':'Not Claimed'}</div></div>`;
-  if (d.version) html += `<div class="stat-card"><div class="sc-label">Version</div><div class="sc-val" style="font-size:14px;color:#888">${d.version}</div></div>`;
+  html += `<div class="stat-card"><div class="sc-label">Account</div><div class="sc-val" style="color:${claimed?'#5ced73':'#f90'};font-size:14px">${claimed?'Claimed':'Not Claimed'}</div></div>`;
+  html += `<div class="stat-card"><div class="sc-label">Daemon</div><div class="sc-val" style="color:${daemonOn?'#5ced73':'#666'};font-size:14px">${daemonOn?'Running':'Off'}</div></div>`;
+  if (tunnels.length) html += `<div class="stat-card"><div class="sc-label">Tunnels</div><div class="sc-val" style="color:#64b5f6">${tunnels.length}</div></div>`;
   html += '</div>';
+
   html += '<div class="server-actions">';
-  if (!daemonOn) html += `<button class="btn btn-start" onclick="startDaemon()">Start Daemon</button>`;
-  if (daemonOn && !claimed) html += `<a href="https://playit.gg/claim" target="_blank" class="btn btn-cmd" style="text-decoration:none">&#x2197; Claim on playit.gg</a>`;
-  html += `<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>`;
+  if (!daemonOn) html += '<button class="btn btn-start" onclick="startDaemon()" id="daemonBtn">Start Daemon</button>';
+  if (daemonOn && !claimed) html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Get Claim URL</button>';
+  html += '<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>';
   html += '</div>';
-  if (daemonOn && !claimed) {
-    html += '<div style="padding:16px;background:#1a2a1a;border:1px solid #2a2a2a;border-radius:8px;margin-top:12px">';
-    html += '<p style="color:#ccc;margin-bottom:10px"><b>Claim your tunnel</b></p>';
-    html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Run playit-cli</button>';
-    html += '<div id="playitCliOutput" style="font-size:12px;color:#888;margin-top:8px"></div>';
+
+  if (!claimed) {
+    html += '<div style="margin-top:16px;padding:16px;background:#1a2a1a;border:1px solid #3a4a3a;border-radius:8px">';
+    html += '<h3 style="margin-bottom:12px;font-size:14px;color:#5ced73">&#9654; Claim Your Tunnel</h3>';
+    if (claimUrl) {
+      html += `<div style="margin-bottom:12px"><a href="${escapeHtml(claimUrl)}" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; ${escapeHtml(claimUrl)}</a></div>`;
+      if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
+      html += '<p style="color:#666;font-size:12px;margin-top:8px">Open the link above to claim your tunnel. The daemon will reconnect automatically once claimed.</p>';
+    } else if (daemonOn) {
+      html += '<p style="color:#ccc;font-size:13px">Daemon is running but no claim URL found yet.</p>';
+      html += '<p style="color:#666;font-size:12px;margin-top:6px">Click "Get Claim URL" above, or visit <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a></p>';
+    } else {
+      html += '<p style="color:#888;font-size:13px">Start the daemon to get a claim URL.</p>';
+    }
+    html += '</div>';
+  } else if (claimUrl) {
+    html += `<div style="margin-top:8px;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;font-size:12px;color:#666">Claim URL: <a href="${escapeHtml(claimUrl)}" target="_blank" style="color:#64b5f6">${escapeHtml(claimUrl)}</a></div>`;
+  }
+
+  if (tunnels.length) {
+    html += '<div style="margin-top:16px;padding:16px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px">';
+    html += '<h3 style="margin-bottom:10px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:1px">Tunnel Addresses</h3>';
+    html += '<div style="display:grid;gap:8px">';
+    for (const t of tunnels) {
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px">`;
+      html += `<span style="font-family:monospace;font-size:14px;color:#5ced73">${escapeHtml(t)}</span>`;
+      html += `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="copyText('${escapeHtml(t)}')">Copy</button>`;
+      html += '</div>';
+    }
+    html += '</div>';
+    html += '<p style="color:#666;font-size:12px;margin-top:10px">Share these addresses with players to connect to your server.</p>';
     html += '</div>';
   }
-  html += '<div id="playitOutput"></div>';
+
+  html += '<div style="margin-top:16px">';
+  html += '<div class="console-wrap">';
+  html += '<div class="console-header"><span>Daemon Logs</span><span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="copyDaemonLogs()">Copy</button></span></div>';
+  html += '<div class="console" id="daemonLogs" style="height:300px">';
+  if (logs.length) {
+    for (const l of logs.slice(-80)) html += `<div>${escapeHtml(l)}</div>`;
+  } else {
+    html += '<span style="color:#555">No daemon logs yet. Start the daemon to see output.</span>';
+  }
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
+
   c.innerHTML = html;
-  updateTunnelDashboard(d);
+  const dl = $('daemonLogs');
+  if (dl) dl.scrollTop = dl.scrollHeight;
+}
+
+function startTunnelPoll() {
+  stopTunnelPoll();
+  _tunnelPoll = setInterval(async () => {
+    if (!$('page-tunnel').classList.contains('active')) { stopTunnelPoll(); return; }
+    try {
+      const d = await get('/api/playit/info');
+      if (d.ok) { renderTunnelPage(d); updateTunnelDashboard(d); }
+    } catch(e) {}
+  }, 3000);
+}
+
+function stopTunnelPoll() {
+  if (_tunnelPoll) { clearInterval(_tunnelPoll); _tunnelPoll = null; }
 }
 
 async function startDaemon() {
-  const outDiv = $('playitOutput');
-  if (!outDiv) return;
-  outDiv.style.cssText = 'font-size:13px;color:#ccc;margin-top:12px;padding:12px;border-radius:6px;background:#0a0a0a';
-  outDiv.innerHTML = '<p style="color:#ccc">Starting daemon...</p>';
-
+  const btn = $('daemonBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
   try {
     const r = await fetch('/api/playit/daemon', {method:'POST'});
     const d = await r.json();
-    if (!d.ok) {
-      outDiv.innerHTML = '<p style="color:#ff4444">' + escapeHtml(d.error || 'Failed to start daemon.') + '</p>';
-      return;
-    }
-
-    outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started! Running playit-cli...</p>';
-
-    const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 40000);
-    const r2 = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
-    clearTimeout(timeout);
-    const d2 = await r2.json();
-
-    if (!d2.ok) {
-      outDiv.innerHTML = '<p style="color:#ff4444;margin-bottom:4px">Daemon started, but playit-cli failed:</p>'
-        + '<pre style="font-size:11px;color:#666;white-space:pre-wrap;margin:0">' + escapeHtml(d2.error || 'Unknown error') + '</pre>';
-      return;
-    }
-
-    if (d2.claim_url && d2.claim_code) {
-      outDiv.innerHTML = ''
-        + '<p style="color:#5ced73;margin-bottom:8px">&#10003; Daemon running! Claim your tunnel:</p>'
-        + '<p style="margin-bottom:8px"><a href="' + d2.claim_url + '" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; Open ' + d2.claim_url + '</a></p>'
-        + '<p style="color:#888;font-size:13px;margin-bottom:4px">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">' + escapeHtml(d2.claim_code) + '</code></p>'
-        + '<p style="color:#666;font-size:12px">Open the link above or go to playit.gg/claim and enter the code.</p>';
-    } else if (d2.claimed) {
-      outDiv.innerHTML = '<p style="color:#5ced73">&#10003; Daemon running! Tunnel is already claimed and active.</p>';
-      setTimeout(loadTunnel, 2000);
-    } else {
-      let html = '<p style="color:#f90;margin-bottom:6px">Daemon started, but no claim URL was found.</p>';
-      html += '<p style="color:#ccc;font-size:12px;margin-bottom:6px">playit-cli output:</p>';
-      if (d2.lines && d2.lines.length) {
-        html += '<pre style="font-size:11px;color:#888;white-space:pre-wrap;margin:0;max-height:200px;overflow-y:auto">';
-        for (const l of d2.lines.slice(-20)) html += escapeHtml(l) + '\n';
-        html += '</pre>';
-      }
-      outDiv.innerHTML = html;
-    }
+    if (!d.ok) { toast(d.error || 'Failed to start daemon', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Start Daemon'; } return; }
+    toast('Daemon started!', 'success');
+    loadTunnel();
   } catch(e) {
-    outDiv.innerHTML = '<p style="color:#ff4444">Request failed or timed out.</p>';
+    toast('Request failed', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Start Daemon'; }
   }
 }
 
 async function runPlayitCli() {
   const btn = $('playitCliBtn');
-  const out = $('playitCliOutput');
-  if (!out) return;
-  btn.disabled = true;
-  btn.textContent = 'Running...';
-  out.style.cssText = 'font-size:12px;color:#ccc;margin-top:8px;padding:8px;border-radius:4px;background:#0a0a0a;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto';
-  out.textContent = 'Running playit-cli...';
+  if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
   try {
     const ac = new AbortController();
     const timeout = setTimeout(() => ac.abort(), 40000);
     const r = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
     clearTimeout(timeout);
     const d = await r.json();
-    if (!d.ok) { out.textContent = d.error || 'Failed.'; btn.disabled = false; btn.textContent = 'Run playit-cli'; return; }
-
-    if (d.claim_url && d.claim_code) {
-      out.innerHTML = ''
-        + '<p style="color:#5ced73;margin-bottom:6px">Claim URL found!</p>'
-        + '<p style="margin-bottom:6px"><a href="' + d.claim_url + '" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:6px 14px;font-size:13px">&#x2197; Claim on playit.gg</a></p>'
-        + '<p style="color:#888;font-size:12px;margin-bottom:2px">Your claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:13px;color:#64b5f6;user-select:all">' + d.claim_code + '</code></p>'
-        + '<p style="color:#666;font-size:11px">Open the link above or enter this code at playit.gg/claim.</p>';
-      setTimeout(loadTunnel, 3000);
-    } else {
-      let html = '<p style="color:#f90;margin-bottom:4px">No claim URL found in output.</p>';
-      if (d.lines && d.lines.length) {
-        html += '<div style="font-size:11px;color:#666;margin-bottom:4px">Output:</div><pre style="font-size:11px;color:#555;white-space:pre-wrap;margin:0">';
-        for (const l of d.lines.slice(-15)) html += escapeHtml(l) + '\n';
-        html += '</pre>';
-      }
-      out.innerHTML = html;
-    }
+    if (!d.ok) { toast(d.error || 'Failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Get Claim URL'; } return; }
+    if (d.claim_url) toast('Claim URL found!', 'success');
+    else toast('No claim URL found in output', 'info');
+    loadTunnel();
   } catch(e) {
-    out.textContent = 'Request timed out or failed.';
+    toast('Request timed out or failed', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Get Claim URL'; }
   }
-  btn.disabled = false;
-  btn.textContent = 'Run playit-cli';
 }
 
 async function installPlayit() {
@@ -1337,13 +1353,37 @@ async function installPlayit() {
 function updateTunnelDashboard(d) {
   const tw = document.getElementById('dashTunnel');
   if (!tw) return;
-  if (d.installed && d.running) {
-    tw.innerHTML = `<span style="color:#5ced73">&#x25cf; Tunnel Online</span>`;
-  } else if (d.installed && d.daemon_running) {
-    tw.innerHTML = `<span style="color:#f90">&#x25cf; Daemon Running</span>`;
-  } else {
-    tw.innerHTML = `<span style="color:#888">&#x25cf; Tunnel Offline</span>`;
-  }
+  if (d.installed && d.running) tw.innerHTML = '<span style="color:#5ced73">&#x25cf; Tunnel Online</span>';
+  else if (d.installed && d.daemon_running) tw.innerHTML = '<span style="color:#f90">&#x25cf; Daemon Running</span>';
+  else tw.innerHTML = '<span style="color:#888">&#x25cf; Tunnel Offline</span>';
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success')).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('Copied!', 'success');
+  });
+}
+
+function copyDaemonLogs() {
+  const dl = $('daemonLogs');
+  if (!dl) return;
+  const text = Array.from(dl.children).map(el => el.textContent).join('\n');
+  if (!text) { toast('No logs to copy', 'info'); return; }
+  navigator.clipboard.writeText(text).then(() => toast('Logs copied!', 'success')).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('Logs copied!', 'success');
+  });
 }
 
 // ── Utility ──

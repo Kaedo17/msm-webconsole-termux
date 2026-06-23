@@ -500,6 +500,15 @@ def register_routes(app, html):
     def api_playit_status():
         return ok(mc_playit.check_tunnel_status())
 
+    @app.route("/api/playit/info")
+    def api_playit_info():
+        return ok(mc_playit.get_tunnel_info())
+
+    @app.route("/api/playit/logs")
+    def api_playit_logs():
+        n = int(request.args.get("n", "100"))
+        return ok({"logs": mc_playit.get_logs(n)})
+
     @app.route("/api/playit/install", methods=["POST"])
     def api_playit_install():
         cmds = mc_playit.install_commands()
@@ -526,10 +535,13 @@ def register_routes(app, html):
         if not ok_:
             return fail(out)
         url, code = mc_playit.parse_claim_url(lines)
+        tunnels = mc_playit.parse_tunnel_urls(lines)
         result = {"lines": lines, "raw": out}
         if url:
             result["claim_url"] = url
             result["claim_code"] = code
+        if tunnels:
+            result["tunnels"] = tunnels
         if "already claimed" in out.lower() or "agent" in out.lower():
             result["claimed"] = True
         return ok(result)
