@@ -91,15 +91,28 @@ def start_tunnel(timeout=30):
     if not is_installed():
         return False, {"error": "Playit not installed"}
 
+    # Ensure daemon runs (capture output in case claim URL appears there)
     if is_claimed():
-        # Already claimed — ensure daemon runs
         if _PLAYITD:
             subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         return True, {"message": "Already claimed. Tunnel should be running."}
 
     all_raw = []
+    claim_url = None
 
-    # Try 1: run playit-cli FIRST (client generates the claim URL)
+    # Step 1: Start playitd — daemon generates the secret + claim URL
+    if _PLAYITD:
+        ok, out, lines = _capture_output([_PLAYITD], timeout=10)
+        all_raw.append(("playitd", out, lines))
+        claim_url = _find_claim_url(lines)
+        if claim_url:
+            return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
+        # Keep daemon running — it's needed for playit-cli
+        subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    else:
+        all_raw.append(("playitd", "", ["playitd not found"]))
+
+    # Step 2: Try playit-cli (connects to the now-running daemon)
     if _PLAYIT_CLI:
         ok, out, lines = _capture_output([_PLAYIT_CLI], timeout=timeout)
         all_raw.append(("playit-cli", out, lines))
@@ -107,7 +120,7 @@ def start_tunnel(timeout=30):
         if claim_url:
             return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    # Try 2: run the main 'playit' binary (combined)
+    # Step 3: Try main 'playit' binary as last resort
     if _PLAYIT:
         ok, out, lines = _capture_output([_PLAYIT], timeout=10)
         all_raw.append(("playit", out, lines))
@@ -115,16 +128,16 @@ def start_tunnel(timeout=30):
         if claim_url:
             return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    # No claim URL found — return everything we captured
+    # No claim URL — return everything
     formatted = []
     for name, out, lines in all_raw:
         formatted.append(f">>> {name} ({len(lines)} lines)")
-        for l in lines[-15:]:
+        for l in lines[-20:]:
             formatted.append(f"  {l}")
     return True, {
         "lines": formatted,
         "raw": "\n".join(f">>> {n}\n{o}" for n, o, _ in all_raw),
-        "message": "Could not find claim URL. Try the manual setup below.",
+        "message": "Could not auto-detect claim URL. Use the manual link below.",
     }
 
 
