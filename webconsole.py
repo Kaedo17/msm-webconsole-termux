@@ -653,29 +653,60 @@ function onServerChange() {
 }
 
 function showCreateServerModal() {
-  $('csType').innerHTML = '';
+  $('csType').innerHTML = '<option value="">Loading...</option>';
   $('csVersion').innerHTML = '<option value="">Loading versions...</option>';
   $('csVersion').disabled = true;
   $('forgeVersionRow').style.display = 'none';
   $('csCreateBtn').disabled = true;
   $('createServerModal').classList.add('show');
-  get('/api/versions').then(d => {
-    if (!d.ok || !d.types) return;
-    let sel = '', firstType = '';
-    for (const t of d.types) {
+
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 15000);
+
+  fetch('/api/versions', {signal: controller.signal}).then(r => r.json()).then(d => {
+    let sel = '';
+    const fallbackTypes = [
+      {id:'paper',label:'Paper',desc:'Plugin Support — High-performance Spigot fork'},
+      {id:'purpur',label:'Purpur',desc:'Plugin Support — Configurable Paper fork'},
+      {id:'spigot',label:'Spigot',desc:'Plugin Support — Bukkit-based server'},
+      {id:'vanilla',label:'Vanilla',desc:'Official Minecraft server'},
+      {id:'folia',label:'Folia',desc:'Some Plugin Support — Multithreaded Paper fork'},
+      {id:'divinemc',label:'DivineMC',desc:'Plugin Support — Optimized Purpur fork'},
+      {id:'fabric',label:'Fabric',desc:'Mod Support — Lightweight modding platform'},
+      {id:'forge',label:'Forge',desc:'Mod Support — Original modding platform'},
+    ];
+    const types = (d && d.ok && d.types) ? d.types : fallbackTypes;
+    let firstType = '';
+    for (const t of types) {
       const s = t.id === 'paper' ? 'selected' : '';
       if (!firstType || t.id === 'paper') firstType = t.id;
       sel += `<option value="${t.id}" ${s}>${t.label}</option>`;
     }
     $('csType').innerHTML = sel;
     $('csType').value = firstType;
-    if (d.versions) {
+    const versions = (d && d.ok && d.versions) ? d.versions : [];
+    if (versions.length) {
       let vhtml = '';
-      for (const v of d.versions) vhtml += `<option>${v}</option>`;
+      for (const v of versions) vhtml += `<option>${v}</option>`;
       $('csVersion').innerHTML = vhtml;
       $('csVersion').disabled = false;
-      $('csCreateBtn').disabled = false;
+    } else {
+      $('csVersion').innerHTML = '<option value="">Enter version manually below</option>';
+      $('csVersion').disabled = false;
+      $('csVersion').style.background = '#1a1a1a';
     }
+    $('csCreateBtn').disabled = false;
+    onCsTypeChange();
+  }).catch(err => {
+    const fallbackTypes = 'paper|Purpur|Spigot|Vanilla|Folia|DivineMC|Fabric|Forge'.split('|');
+    let sel = '';
+    for (const t of fallbackTypes) {
+      sel += `<option value="${t.toLowerCase()}" ${t.toLowerCase()==='paper'?'selected':''}>${t}</option>`;
+    }
+    $('csType').innerHTML = sel;
+    $('csVersion').innerHTML = '<option value="">Enter version manually</option>';
+    $('csVersion').disabled = false;
+    $('csCreateBtn').disabled = false;
     onCsTypeChange();
   });
 }
@@ -718,10 +749,14 @@ async function doImportServer() {
   if (!path) { toast('Enter a folder path', 'error'); return; }
   const name = $('impName').value.trim() || undefined;
   closeModal('importModal');
-  const r = await fetch('/api/servers/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, name})});
-  const rd = await r.json();
-  if (rd.ok) { toast(rd.message || 'Imported', 'success'); loadServers(); }
-  else toast(rd.error || 'Import failed', 'error');
+  try {
+    const r = await fetch('/api/servers/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, name})});
+    const rd = await r.json();
+    if (rd.ok) { toast(rd.message || 'Imported', 'success'); loadServers(); }
+    else { toast(rd.error || 'Import failed — check that the path exists and contains a .jar file', 'error'); console.error('Import error:', rd); }
+  } catch(e) {
+    toast('Network error during import', 'error');
+  }
 }
 
 async function deleteServer(sid, name) {
