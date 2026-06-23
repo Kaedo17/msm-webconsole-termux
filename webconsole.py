@@ -1245,7 +1245,8 @@ async function startDaemon() {
     if (d.ok) {
       outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
         + '<p style="color:#ccc;font-size:13px">Reloading page...</p>';
-      loadTunnel(); else {
+      loadTunnel();
+    } else {
       outDiv.textContent = d.error || 'Failed.';
     }
   } catch(e) {
