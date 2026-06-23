@@ -1,33 +1,30 @@
-"""Playit.gg tunnel integration for exposing Minecraft servers to the internet."""
+"""Playit.gg tunnel integration — Termux: playitd + playit-cli."""
 
 import os
 import re
 import shutil
 import subprocess
-import threading
 import time
 from pathlib import Path
 
-PLAYIT_BIN = shutil.which("playit") or shutil.which("playit-cli") or ""
+PLAYITD = shutil.which("playitd") or ""
+PLAYIT_CLI = shutil.which("playit-cli") or shutil.which("playit") or ""
 PLAYIT_SECRET = Path.home() / ".playit" / "secret"
 
 
 def is_installed():
-    return bool(PLAYIT_BIN) and os.access(PLAYIT_BIN, os.X_OK)
+    return bool(PLAYIT_CLI) and os.access(PLAYIT_CLI, os.X_OK)
 
 
 def install_commands():
-    return [
-        "pkg install tur-repo -y",
-        "pkg install playit -y",
-    ]
+    return ["pkg install tur-repo -y", "pkg install playit -y"]
 
 
 def get_version():
     if not is_installed():
         return ""
     try:
-        out = subprocess.check_output([PLAYIT_BIN, "--version"], text=True, timeout=10, stderr=subprocess.PIPE)
+        out = subprocess.check_output([PLAYIT_CLI, "--version"], text=True, timeout=10, stderr=subprocess.PIPE)
         return out.strip()
     except Exception:
         return ""
@@ -37,30 +34,55 @@ def is_claimed():
     return PLAYIT_SECRET.exists()
 
 
+def _is_daemon_running():
+    """Check if playitd process is running."""
+    if not PLAYITD:
+        return False
+    try:
+        import signal
+        out = subprocess.check_output(["pgrep", "-x", "playitd"], text=True, timeout=5, stderr=subprocess.DEVNULL)
+        return bool(out.strip())
+    except Exception:
+        return False
+
+
+def _start_daemon():
+    """Start playitd as a background process."""
+    if not PLAYITD:
+        return False, "playitd not found."
+    if _is_daemon_running():
+        return True, "Daemon already running."
+    try:
+        subprocess.Popen(
+            [PLAYITD],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        time.sleep(2)
+        if _is_daemon_running():
+            return True, "Daemon started."
+        return True, "Daemon launch attempted (check status)"
+    except Exception as e:
+        return False, str(e)
+
+
 def start_tunnel(timeout=30):
-    """Start playit-cli, capture claim URL or tunnel info.
-    Returns (success, result_dict)."""
     if not is_installed():
         return False, {"error": "Playit not installed."}
 
+    ok, msg = _start_daemon()
+    if not ok:
+        return False, {"error": f"Failed to start daemon: {msg}"}
+
     if is_claimed():
-        try:
-            proc = subprocess.Popen(
-                [PLAYIT_BIN],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL, text=True,
-            )
-            return True, {"message": "Tunnel was already claimed. Check tunnel page.", "proc_pid": proc.pid}
-        except Exception as e:
-            return False, {"error": str(e)}
+        return True, {"message": "Already claimed. Tunnel should be running."}
 
     try:
         proc = subprocess.Popen(
-            [PLAYIT_BIN],
+            [PLAYIT_CLI],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True, bufsize=1,
         )
-
         lines = []
         claim_url = None
         start_time = time.time()
@@ -72,20 +94,19 @@ def start_tunnel(timeout=30):
             line = (out_line or err_line).strip()
             if line:
                 lines.append(line)
-                line_lower = line.lower()
                 m = re.search(r'https://playit\.gg/claim/(\S+)', line)
                 if m:
                     claim_url = m.group(0)
                     break
-                m = re.search(r'claim\s*(?:url|this|at)?\s*:?\s*(https://[^\s]+)', line)
+                m = re.search(r'claim[:\s]+(https://[^\s]+)', line)
                 if m:
                     claim_url = m.group(1)
                     break
-                m = re.search(r'public[:\s]+(\d+\.\d+\.\d+\.\d+)[:\s](\d+)', line_lower)
+                m = re.search(r'public[\s:]+(\d+\.\d+\.\d+\.\d+)[:\s](\d+)', line.lower())
                 if m:
                     return True, {"ip": m.group(1), "port": m.group(2), "lines": lines}
-                if "already running" in line_lower:
-                    return True, {"message": "Tunnel already running.", "lines": lines}
+                if "already running" in line.lower():
+                    return True, {"message": "Already running.", "lines": lines}
             if ret is not None and not out_line and not err_line:
                 break
             time.sleep(0.3)
@@ -95,14 +116,12 @@ def start_tunnel(timeout=30):
 
         if claim_url:
             return True, {"claim": claim_url, "lines": lines}
-
         if lines:
-            return True, {"message": "Tunnel output captured", "lines": lines, "claimed": is_claimed()}
-
-        return True, {"message": "Tunnel started (no output yet). Run again in a few seconds.", "lines": lines}
+            return True, {"message": "Output captured", "lines": lines}
+        return True, {"message": "Started. Run again in a few seconds.", "lines": lines}
 
     except FileNotFoundError:
-        return False, {"error": "Playit not found."}
+        return False, {"error": "Playit-cli not found."}
     except Exception as e:
         return False, {"error": str(e)}
 
@@ -115,11 +134,16 @@ def check_tunnel_status():
         "installed": True,
         "claimed": is_claimed(),
         "version": get_version(),
+        "daemon_running": _is_daemon_running(),
     }
+
+    if not result["daemon_running"]:
+        result["running"] = False
+        return result
 
     try:
         out = subprocess.check_output(
-            [PLAYIT_BIN, "status"], text=True, timeout=10,
+            [PLAYIT_CLI, "status"], text=True, timeout=10,
             stderr=subprocess.STDOUT,
         )
         result["running"] = "running" in out.lower() or "active" in out.lower()

@@ -609,10 +609,15 @@ launch_web_ui() {
         err "Python 3 not found. Install: pkg install python"
         return 1
     fi
+    # If --dir was given, import it into ~/mc-servers/ first
+    if [ "$SERVER_DIR" != "$SCRIPT_DIR" ]; then
+        info "Importing server from $SERVER_DIR ..."
+        python3 "$web_py" --dir "$SERVER_DIR" --headless 2>&1 || true
+    fi
     info "Launching web UI..."
     info "Open http://localhost:5000 in your browser"
     echo
-    python3 "$web_py" --dir "$SERVER_DIR"
+    python3 "$web_py"
 }
 
 usage() {

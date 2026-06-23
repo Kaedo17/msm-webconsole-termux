@@ -178,35 +178,34 @@ def import_server(folder_path, name=None):
         name = folder.name
     sid = _gen_id(name)
     port = _next_available_port()
-    jar_type = "unknown"
-    for f in folder.glob("*.jar"):
-        fname = f.name.lower()
-        if "paper" in fname:
-            jar_type = "paper"
-        elif "purpur" in fname:
-            jar_type = "purpur"
-        elif "spigot" in fname:
-            jar_type = "spigot"
-        elif "forge" in fname:
-            jar_type = "forge"
-        elif "fabric" in fname:
-            jar_type = "fabric"
-        elif "neoforge" in fname:
-            jar_type = "neoforge"
-        elif "quilt" in fname:
-            jar_type = "quilt"
-        elif "folia" in fname:
-            jar_type = "folia"
-        else:
-            jar_type = "vanilla"
-        break
-    inst = ServerInstance(sid, name, folder, jar_type, port=port)
+    jar_type = _detect_jar_type(folder)
+    dest = SERVERS_BASE / sid
+    if str(folder.resolve()) != str(dest.resolve()):
+        import shutil
+        shutil.copytree(str(folder), str(dest), dirs_exist_ok=True, ignore_dangling_symlinks=True)
+    else:
+        dest = folder
+    inst = ServerInstance(sid, name, dest, jar_type, port=port)
     inst.load_config()
-    inst.dir = folder
     with _registry_lock:
         _servers[sid] = inst
     _save_registry()
-    return inst, f"Imported '{name}' from {folder}"
+    return inst, f"Imported '{name}' to mc-servers/{sid}"
+
+
+def _detect_jar_type(folder):
+    for f in folder.glob("*.jar"):
+        fname = f.name.lower()
+        if "paper" in fname: return "paper"
+        if "purpur" in fname: return "purpur"
+        if "spigot" in fname: return "spigot"
+        if "forge" in fname: return "forge"
+        if "fabric" in fname: return "fabric"
+        if "neoforge" in fname: return "neoforge"
+        if "quilt" in fname: return "quilt"
+        if "folia" in fname: return "folia"
+        return "vanilla"
+    return "unknown"
 
 
 def _next_available_port():
