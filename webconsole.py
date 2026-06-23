@@ -28,7 +28,6 @@ except ImportError:
     from flask import Flask
 
 import mc_state
-from mc_state import load_config
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Create Flask app — MUST come before route imports
