@@ -513,20 +513,9 @@ def register_routes(app, html):
         installed = mc_playit.is_installed()
         return ok({"installed": installed, "steps": results})
 
-    @app.route("/api/playit/start", methods=["POST"])
-    def api_playit_start():
-        ok_, result = mc_playit.start_tunnel()
-        if ok_:
-            return ok(result)
-        return fail(result.get("error", "Tunnel failed to start"))
-
     @app.route("/api/playit/daemon", methods=["POST"])
     def api_playit_daemon():
-        import subprocess as _sp
-        if not mc_playit._PLAYITD:
-            return fail("playitd not found.")
-        try:
-            _sp.Popen([mc_playit._PLAYITD], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, stdin=_sp.DEVNULL)
-            return ok({"message": "Daemon started."})
-        except Exception as e:
-            return fail(str(e))
+        ok_, msg = mc_playit.start_daemon()
+        if ok_:
+            return ok({"message": msg})
+        return fail(msg)
