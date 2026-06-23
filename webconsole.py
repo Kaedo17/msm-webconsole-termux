@@ -1258,12 +1258,20 @@ async function startPlayit() {
     } else if (d.ip) {
       outDiv.textContent = `Tunnel ready! Public: ${d.ip}:${d.port}`;
       loadTunnel();
-    } else if (d.message) {
-      outDiv.textContent = d.message;
-      if (d.lines && d.lines.length) outDiv.textContent += '\n\n' + d.lines.join('\n');
+    } else if (d.lines && d.lines.length) {
+      outDiv.textContent = d.message || 'Output captured:';
+      outDiv.textContent += '\n' + d.lines.slice(-20).join('\n');
+      if (d.raw) outDiv.textContent += '\n\n[Full output]\n' + d.raw;
     } else {
-      outDiv.textContent = 'Tunnel started. Check the page for status.';
+      outDiv.textContent = d.message || 'Tunnel started. Check the page for status.';
     }
+    if (d.lines && d.lines.length) {
+      outDiv.textContent += '\n\nOutput:\n' + d.lines.join('\n');
+    }
+  } catch(e) {
+    $('playitOutput').textContent = 'Request timed out or failed. Try again.';
+  }
+}
     if (d.lines && d.lines.length) {
       outDiv.textContent += '\n\nOutput:\n' + d.lines.join('\n');
     }
