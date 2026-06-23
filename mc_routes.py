@@ -17,6 +17,7 @@ from mc_server import start_server, stop_server, send_server
 from mc_properties import PROPS_SCHEMA, save_props
 from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download, list_installed_packs
 from mc_curseforge import curseforge_search as cf_search, curseforge_versions as cf_versions
+import mc_downloads
 
 
 def _resolve(sid):
@@ -50,7 +51,27 @@ def register_routes(app, html):
         if not re.match(r"^\d+[MG]$", mr) or not re.match(r"^\d+[MG]$", mx):
             return fail("Invalid RAM format.")
         inst = mci.create_server(name, jt, mr, mx)
+        mc_ver = data.get("mc_version", "")
+        if mc_ver:
+            forge_ver = data.get("forge_version", "")
+            ok_, msg = mc_downloads.download_server_jar(inst.dir, jt, mc_ver, forge_ver)
+            if not ok_:
+                return ok({"message": f"Server created but download failed: {msg}",
+                           "server": inst.to_dict()})
         return ok({"message": f"Server '{name}' created.", "server": inst.to_dict()})
+
+    @app.route("/api/versions")
+    def api_versions():
+        st = request.args.get("type", "vanilla")
+        versions = mc_downloads.get_versions(st)
+        types = [{"id": t, **mc_downloads.install_type_details(t)} for t in mc_downloads.SERVER_TYPES]
+        return ok({"versions": versions, "types": types})
+
+    @app.route("/api/versions/forge")
+    def api_forge_versions():
+        mc_ver = request.args.get("mc_version", "")
+        versions = mc_downloads.get_forge_versions(mc_ver) if mc_ver else []
+        return ok({"forge_versions": versions})
 
     @app.route("/api/servers/import", methods=["POST"])
     def api_server_import():

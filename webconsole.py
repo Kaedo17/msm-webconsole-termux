@@ -322,29 +322,30 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 <div class="modal" id="createServerModal">
-  <div class="modal-box" style="min-width:400px">
+  <div class="modal-box" style="min-width:450px">
     <h3>Create Server</h3>
     <label style="font-size:13px;color:#888;display:block;margin-top:10px">Server Name</label>
     <input type="text" id="csName" placeholder="My Server" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     <label style="font-size:13px;color:#888;display:block;margin-top:10px">Server Type</label>
-    <select id="csType" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
-      <option value="vanilla">Vanilla</option>
-      <option value="paper" selected>Paper</option>
-      <option value="purpur">Purpur</option>
-      <option value="spigot">Spigot</option>
-      <option value="forge">Forge</option>
-      <option value="fabric">Fabric</option>
-      <option value="neoforge">NeoForge</option>
-      <option value="quilt">Quilt</option>
-      <option value="folia">Folia</option>
+    <select id="csType" onchange="onCsTypeChange()" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     </select>
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Minecraft Version</label>
+    <select id="csVersion" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+      <option value="">Loading...</option>
+    </select>
+    <div id="forgeVersionRow" style="display:none">
+      <label style="font-size:13px;color:#888;display:block;margin-top:10px">Forge Version</label>
+      <select id="csForgeVersion" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+        <option value="">Select Forge version...</option>
+      </select>
+    </div>
     <div style="display:flex;gap:12px;margin-top:10px">
       <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="text" id="csMinRam" value="512M" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
       <div style="flex:1"><label style="font-size:13px;color:#888">Max RAM</label><input type="text" id="csMaxRam" value="2G" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
     </div>
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
-      <button class="btn btn-start" onclick="doCreateServer()">Create</button>
+      <button class="btn btn-start" id="csCreateBtn" onclick="doCreateServer()">Create & Download</button>
     </div>
   </div>
 </div>
@@ -408,7 +409,8 @@ function toast(msg, type='info') {
 async function api(method, body) {
   const opts = {method:'POST'};
   if (body) opts.body = JSON.stringify(body), opts.headers = {'Content-Type':'application/json'};
-  const prefix = _currentServer ? `/api/servers/${_currentServer}/` : '/api/';
+  const globalApis = {'servers':1, 'versions':1, 'servers/import':1};
+  const prefix = (_currentServer && !globalApis[method]) ? `/api/servers/${_currentServer}/` : '/api/';
   const r = await fetch(`${prefix}${method}`, opts);
   const d = await r.json();
   if (!d.ok) toast(d.error, 'error');
@@ -417,7 +419,9 @@ async function api(method, body) {
 }
 
 async function get(path) {
-  if (path.startsWith('/api/') && !path.startsWith('/api/servers/') && _currentServer) {
+  const globalPaths = ['/api/servers', '/api/versions'];
+  const isGlobal = globalPaths.some(p => path.startsWith(p));
+  if (path.startsWith('/api/') && !isGlobal && _currentServer) {
     path = `/api/servers/${_currentServer}/${path.replace('/api/', '')}`;
   }
   const r = await fetch(path);
@@ -644,17 +648,63 @@ function onServerChange() {
   loadServers();
 }
 
-function showCreateServerModal() { $('createServerModal').classList.add('show'); }
+function showCreateServerModal() {
+  $('csType').innerHTML = '';
+  $('csVersion').innerHTML = '<option value="">Loading versions...</option>';
+  $('csVersion').disabled = true;
+  $('forgeVersionRow').style.display = 'none';
+  $('csCreateBtn').disabled = true;
+  $('createServerModal').classList.add('show');
+  get('/api/versions').then(d => {
+    if (!d.ok || !d.types) return;
+    let sel = '', firstType = '';
+    for (const t of d.types) {
+      const s = t.id === 'paper' ? 'selected' : '';
+      if (!firstType || t.id === 'paper') firstType = t.id;
+      sel += `<option value="${t.id}" ${s}>${t.label}</option>`;
+    }
+    $('csType').innerHTML = sel;
+    $('csType').value = firstType;
+    if (d.versions) {
+      let vhtml = '';
+      for (const v of d.versions) vhtml += `<option>${v}</option>`;
+      $('csVersion').innerHTML = vhtml;
+      $('csVersion').disabled = false;
+      $('csCreateBtn').disabled = false;
+    }
+    onCsTypeChange();
+  });
+}
+
+function onCsTypeChange() {
+  $('forgeVersionRow').style.display = ($('csType').value === 'forge') ? 'block' : 'none';
+  if ($('csType').value === 'forge') loadForgeVersions();
+}
+
+async function loadForgeVersions() {
+  const mcVer = $('csVersion').value;
+  if (!mcVer) return;
+  const d = await get(`/api/versions/forge?mc_version=${mcVer}`);
+  if (!d.ok || !d.forge_versions) return;
+  let html = '<option value="">Select Forge version...</option>';
+  for (const v of d.forge_versions) html += `<option>${v}</option>`;
+  $('csForgeVersion').innerHTML = html;
+}
 
 async function doCreateServer() {
   const name = $('csName').value.trim();
   if (!name) { toast('Enter a server name', 'error'); return; }
   const jt = $('csType').value;
+  const mcVer = $('csVersion').value;
+  const forgeVer = $('csForgeVersion')?.value || '';
   const minRam = $('csMinRam').value.trim().toUpperCase();
   const maxRam = $('csMaxRam').value.trim().toUpperCase();
   closeModal('createServerModal');
-  const d = await api('servers', {name, jar_type: jt, min_ram: minRam, max_ram: maxRam});
-  if (d.ok) loadServers();
+  const body = {name, jar_type: jt, min_ram: minRam, max_ram: maxRam};
+  if (mcVer) body.mc_version = mcVer;
+  if (forgeVer && jt === 'forge') body.forge_version = forgeVer;
+  const d = await api('servers', body);
+  if (d.ok) { loadServers(); toast(`Server '${name}' created!`, 'success'); }
 }
 
 function showImportModal() { $('importModal').classList.add('show'); }
