@@ -316,6 +316,14 @@ HTML = r"""<!DOCTYPE html>
 <div class="modal" id="versionModal">
   <div class="modal-box">
     <h3 id="versionModalTitle">Select Version</h3>
+    <div id="versionFilters" style="display:flex;gap:8px;margin:10px 0">
+      <select id="verFilterGameVer" onchange="applyVersionFilters()" style="flex:1;padding:6px 8px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:12px;outline:none">
+        <option value="">All game versions</option>
+      </select>
+      <select id="verFilterLoader" onchange="applyVersionFilters()" style="flex:1;padding:6px 8px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:12px;outline:none">
+        <option value="">All platforms</option>
+      </select>
+    </div>
     <div id="versionList"></div>
     <div class="modal-actions" style="margin-top:12px">
       <button class="btn btn-secondary" onclick="closeModal('versionModal')">Cancel</button>
@@ -816,6 +824,7 @@ async function deleteServer(sid, name) {
   setInterval(pollStatus, 2000);
   pollStatus();
   loadServers();
+  loadDashboard();
   setInterval(async () => {
     if (document.getElementById('dashTunnel')) {
       const td = await get('/api/playit/status');
@@ -1035,17 +1044,23 @@ async function searchPacks(auto) {
   container.innerHTML = html;
 }
 
-async function showVersions(projectId, title, packType, provider) {
-  $('versionModalTitle').textContent = `Versions — ${title}`;
-  $('versionList').innerHTML = '<div class="search-status">Loading...</div>';
-  $('versionModal').classList.add('show');
-  let url = `/api/packs/versions?id=${projectId}&type=${packType}`;
-  if (provider) url += `&provider=${provider}`;
-  const d = await get(url);
-  if (!d.ok || !d.versions) { $('versionList').innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
-  if (!d.versions.length) { $('versionList').innerHTML = '<div class="search-status">No versions found</div>'; return; }
+let _allVersions = [];
+let _versionPackType = '';
+
+function renderVersions() {
+  const gameVerFilter = $('verFilterGameVer').value;
+  const loaderFilter = $('verFilterLoader').value;
+  const filtered = _allVersions.filter(v => {
+    if (gameVerFilter && !(v.game_versions||[]).includes(gameVerFilter)) return false;
+    if (loaderFilter && !(v.loaders||[]).includes(loaderFilter)) return false;
+    return true;
+  });
+  if (!filtered.length) {
+    $('versionList').innerHTML = '<div class="search-status" style="padding:20px">No versions match the selected filters.</div>';
+    return;
+  }
   let html = '<div style="max-height:300px;overflow-y:auto">';
-  for (const v of d.versions) {
+  for (const v of filtered) {
     const gameVer = (v.game_versions||[]).slice(0,3).join(', ') + ((v.game_versions||[]).length > 3 ? '...' : '');
     const loaders = (v.loaders||[]).join(', ');
     for (const f of (v.files||[]).slice(0,1)) {
@@ -1053,12 +1068,46 @@ async function showVersions(projectId, title, packType, provider) {
       html += `<div style="padding:10px;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;background:#151515">
         <div style="font-size:13px"><strong>${escapeHtml(v.name)}</strong> <span style="color:#888">${v.version_number}</span></div>
         <div style="font-size:12px;color:#666;margin:4px 0">${gameVer} | ${loaders} | ${size}</div>
-        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="installPack('${f.url}','${f.filename}','${packType}')">Download</button>
+        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="installPack('${f.url}','${f.filename}','${_versionPackType}')">Download</button>
       </div>`;
     }
   }
   html += '</div>';
   $('versionList').innerHTML = html;
+}
+
+function applyVersionFilters() {
+  renderVersions();
+}
+
+async function showVersions(projectId, title, packType, provider) {
+  $('versionModalTitle').textContent = `Versions — ${title}`;
+  $('versionList').innerHTML = '<div class="search-status">Loading...</div>';
+  $('verFilterGameVer').innerHTML = '<option value="">All game versions</option>';
+  $('verFilterLoader').innerHTML = '<option value="">All platforms</option>';
+  $('versionModal').classList.add('show');
+  _versionPackType = packType;
+  let url = `/api/packs/versions?id=${projectId}&type=${packType}`;
+  if (provider) url += `&provider=${provider}`;
+  const d = await get(url);
+  if (!d.ok || !d.versions) { $('versionList').innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
+  if (!d.versions.length) { $('versionList').innerHTML = '<div class="search-status">No versions found</div>'; return; }
+  _allVersions = d.versions;
+  const gameVersions = [...new Set(_allVersions.flatMap(v => v.game_versions||[]))].sort().reverse();
+  const loaders = [...new Set(_allVersions.flatMap(v => v.loaders||[]))].sort();
+  const gvSelect = $('verFilterGameVer');
+  for (const gv of gameVersions) {
+    const opt = document.createElement('option');
+    opt.value = gv; opt.textContent = gv;
+    gvSelect.appendChild(opt);
+  }
+  const lSelect = $('verFilterLoader');
+  for (const l of loaders) {
+    const opt = document.createElement('option');
+    opt.value = l; opt.textContent = l;
+    lSelect.appendChild(opt);
+  }
+  renderVersions();
 }
 
 async function installPack(fileUrl, filename, packType) {
