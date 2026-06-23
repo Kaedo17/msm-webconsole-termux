@@ -164,6 +164,10 @@ HTML = r"""<!DOCTYPE html>
   .installed-item .ii-info strong{color:#ccc}
   .installed-item .ii-info span{color:#888;margin-left:8px}
   .search-status{padding:12px;text-align:center;color:#666;font-size:13px}
+  .dropzone{border:2px dashed #444;border-radius:8px;padding:24px;text-align:center;color:#888;cursor:pointer;transition:.2s;margin-bottom:16px}
+  .dropzone:hover,.dropzone.dragover{border-color:#5ced73;color:#5ced73;background:#1a2a1a}
+  .dropzone input{display:none}
+  .upload-progress{font-size:12px;color:#888;margin-top:6px}
   @media(max-width:768px){.sidebar{display:none}.content{padding:12px}}
 </style>
 </head>
@@ -204,7 +208,13 @@ HTML = r"""<!DOCTYPE html>
         </form>
       </div>
     </div>
-    <div class="page" id="page-files"><div id="fileBrowser" class="loading">Loading files...</div></div>
+    <div class="page" id="page-files">
+      <div id="fileDropzone" class="dropzone">
+        Drag & drop files here to upload, or click to browse
+        <input type="file" id="fileInput" multiple>
+      </div>
+      <div id="fileBrowser" class="loading">Loading files...</div>
+    </div>
     <div class="page" id="page-properties"></div>
     <div class="page" id="page-packs">
       <div class="pack-subnav">
@@ -221,7 +231,13 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <div id="packResults"></div>
       </div>
-      <div id="packInstalled" style="display:none"><div id="packInstalledList"></div></div>
+      <div id="packInstalled" style="display:none">
+        <div class="dropzone" id="packDropzone" style="margin-bottom:16px">
+          Drag & drop .jar / .zip files to install as mods or resource packs
+          <input type="file" id="packInput" multiple accept=".jar,.zip,.litemod">
+        </div>
+        <div id="packInstalledList"></div>
+      </div>
     </div>
     <div class="page" id="page-backups">
       <div class="server-actions">
@@ -287,11 +303,11 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $(`page-${name}`).classList.add('active');
   if (name === 'console') setupConsole();
-  if (name === 'files') loadFileTree();
+  if (name === 'files') { initFileDropzone(); loadFileTree(); }
   if (name === 'backups') loadBackups();
   if (name === 'dashboard') loadDashboard();
   if (name === 'properties') loadProperties();
-  if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
+  if (name === 'packs') { initPackDropzone(); loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
 }
 
 // ── Toast ──
@@ -316,6 +332,35 @@ async function api(method, body) {
 async function get(path) {
   const r = await fetch(path);
   return r.json();
+}
+
+async function uploadFile(file, dest) {
+  const fd = new FormData();
+  fd.append('file', file);
+  if (dest) fd.append('dest', dest);
+  const r = await fetch('/api/upload', {method:'POST', body: fd});
+  const d = await r.json();
+  if (!d.ok) toast(d.error || 'Upload failed', 'error');
+  else toast(d.message || 'Uploaded', 'success');
+  return d;
+}
+
+function initDropzone(zoneId, inputId, onFiles) {
+  const zone = document.getElementById(zoneId);
+  if (!zone) return;
+  const input = document.getElementById(inputId);
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files.length) onFiles(input.files);
+    input.value = '';
+  });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
+  });
 }
 
 // ── Status bar ──
@@ -552,7 +597,7 @@ async function showVersions(projectId, title, packType, provider) {
   $('versionModalTitle').textContent = `Versions — ${title}`;
   $('versionList').innerHTML = '<div class="search-status">Loading...</div>';
   $('versionModal').classList.add('show');
-  let url = `/api/packs/versions?id=${projectId}`;
+  let url = `/api/packs/versions?id=${projectId}&type=${packType}`;
   if (provider) url += `&provider=${provider}`;
   const d = await get(url);
   if (!d.ok || !d.versions) { $('versionList').innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
@@ -607,6 +652,26 @@ async function loadInstalledPacks() {
   }
   html += '</div>';
   container.innerHTML = html;
+}
+
+function initPackDropzone() {
+  if (window._packDzInit) return;
+  window._packDzInit = true;
+  initDropzone('packDropzone', 'packInput', async (files) => {
+    for (const f of files) {
+      const name = f.name.toLowerCase();
+      let dest = '';
+      if (name.endsWith('.zip') && !name.includes('resource') && !name.includes('shader')) {
+        dest = 'mods';
+      } else if (name.endsWith('.jar') || name.endsWith('.litemod')) {
+        dest = 'mods';
+      } else {
+        dest = 'resourcepacks';
+      }
+      await uploadFile(f, dest);
+    }
+    loadInstalledPacks();
+  });
 }
 
 async function removePack(path, name) {
@@ -720,6 +785,19 @@ async function saveFile() {
   if (!currentFilePath) return;
   const d = await api('file/save', {path: currentFilePath, content});
   if (d.ok) toast('File saved!', 'success');
+}
+
+let _fileUploadDest = '';
+
+function initFileDropzone() {
+  if (window._fileDzInit) return;
+  window._fileDzInit = true;
+  initDropzone('fileDropzone', 'fileInput', async (files) => {
+    for (const f of files) {
+      await uploadFile(f, _fileUploadDest);
+    }
+    loadFileTree(_fileUploadDest);
+  });
 }
 
 // ── Backups ──

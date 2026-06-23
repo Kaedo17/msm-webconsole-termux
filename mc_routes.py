@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 from flask import request, Response  # type: ignore
+from werkzeug.utils import secure_filename  # type: ignore
 
 import mc_state
 from mc_helpers import (
@@ -182,6 +183,31 @@ def register_routes(app, html):
         except Exception as e:
             return fail(str(e))
 
+    @app.route("/api/upload", methods=["POST"])
+    def api_upload():
+        if "file" not in request.files:
+            return fail("No file provided.")
+        f = request.files["file"]
+        if not f.filename:
+            return fail("No filename.")
+        filename = secure_filename(f.filename)
+        if not filename:
+            filename = "uploaded_file"
+        dest_dir_str = request.form.get("dest", "")
+        dest_dir = safe_resolve(dest_dir_str) if dest_dir_str else mc_state.SERVER_DIR
+        if dest_dir is None:
+            return fail("Access denied.")
+        if not dest_dir.exists():
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / filename
+        try:
+            f.save(str(dest))
+            rel = str(dest.relative_to(mc_state.SERVER_DIR))
+            return ok({"message": f"Uploaded {filename}", "path": rel, "name": filename,
+                       "size": dest.stat().st_size})
+        except Exception as e:
+            return fail(f"Upload failed: {e}")
+
     # ═══════════════════════════════════════════════════════════════════
     #  BACKUPS
     # ═══════════════════════════════════════════════════════════════════
@@ -290,13 +316,14 @@ def register_routes(app, html):
     @app.route("/api/packs/versions")
     def api_packs_versions():
         pid = request.args.get("id", "")
+        pt = request.args.get("type", "mod")
         prov = request.args.get("provider", "modrinth")
         if not pid:
             return fail("Project ID required.")
         if prov == "modrinth":
             versions = modrinth_versions(pid)
         elif prov == "curseforge":
-            versions = cf_versions(pid)
+            versions = cf_versions(pid, pt)
         else:
             versions = modrinth_versions(pid)
         if isinstance(versions, dict) and "error" in versions:

@@ -136,10 +136,11 @@ def _get_project_summary(slug, cat, project_type, search_html=""):
         }
 
 
-def curseforge_versions(project_id, limit=20):
+def curseforge_versions(project_id, project_type="mod", limit=20):
     """Parse available files from the project page's Next.js SSR data."""
     try:
-        url = f"{CF_BASE}/minecraft/mc-mods/{project_id}"
+        cat = _category_path(project_type)
+        url = f"{CF_BASE}/minecraft/{cat}/{project_id}"
         try:
             html = _cf_get_html(url)
         except Exception:
@@ -147,7 +148,7 @@ def curseforge_versions(project_id, limit=20):
 
         nd = _parse_next_data(html)
 
-        file_ids = re.findall(r'/minecraft/mc-mods/[a-z0-9_-]+/files/(\d+)', html)
+        file_ids = re.findall(rf'/minecraft/{re.escape(cat)}/[a-z0-9_-]+/files/(\d+)', html)
         file_names = re.findall(r'"fileName":"([^"]*)"', nd)
         game_vers = re.findall(r'"gameVersions":\[([^\]]*)\]', nd)
 
@@ -160,7 +161,7 @@ def curseforge_versions(project_id, limit=20):
             gv_raw = game_vers[i] if i < len(game_vers) else ""
             gv = [v.strip('"') for v in gv_raw.split(",") if v.strip()]
 
-            page_url = f"{CF_BASE}/minecraft/mc-mods/{project_id}/download/{fid}" if fid else ""
+            page_url = f"{CF_BASE}/minecraft/{cat}/{project_id}/download/{fid}" if fid else ""
 
             versions.append({
                 "id": fid or fname,
