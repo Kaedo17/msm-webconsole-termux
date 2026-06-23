@@ -228,7 +228,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="btn btn-restart" onclick="showRestartModal()">Restart</button>
       </div>
       <div class="console-wrap">
-        <div class="console-header"><span>Server Console</span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="clearConsole()">Clear</button></div>
+        <div class="console-header"><span>Server Console</span><span><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="copyConsoleLogs()">Copy Logs</button><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="clearConsole()">Clear</button></span></div>
         <div class="console" id="consoleOutput"><span style="color:#555">Server not running — start it to see console output</span></div>
         <form class="cmd-bar" onsubmit="return sendCmd(event)">
           <input type="text" id="cmdInput" placeholder="Type a command..." autocomplete="off">
@@ -1018,8 +1018,12 @@ function appendConsoleLine(out, line) {
   const div = document.createElement('div');
   let cls = '';
   let text = line;
-  text = text.replace(/\xa7[0-9a-fklmnor]/g, '');
-  text = text.replace(/\u00a7[0-9a-fklmnor]/g, '');
+
+  text = text.replace(/[\u00a7\x7f]([0-9a-fklmnor])/gi, '');
+  text = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  text = text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  text = text.replace(/\u00a7/g, '');
+
   if (/\[.*\/INFO\]:/.test(line) || /]: <|]: \[Not Secure\]/.test(line)) cls = 'info';
   if (/\[.*\/WARN\]:/.test(line)) cls = 'warn';
   if (/\[.*\/ERROR\]:/.test(line)) cls = 'error';
@@ -1030,7 +1034,7 @@ function appendConsoleLine(out, line) {
   if (/]: .* whispers: /.test(line)) cls = 'say';
   if (/]: .* </.test(line) && !/]: \[Not Secure\]/.test(line)) cls = 'say';
   let ts = '';
-  const tm = line.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
+  const tm = text.match(/^\[([0-9]{2}:[0-9]{2}:[0-9]{2})\]/);
   if (tm) ts = tm[1];
   div.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${escapeHtml(text)}</span>`;
   out.appendChild(div);
@@ -1038,6 +1042,20 @@ function appendConsoleLine(out, line) {
 
 function clearConsole() {
   $('consoleOutput').innerHTML = '<span style="color:#555">Server not running — start it to see console output</span>';
+}
+
+function copyConsoleLogs() {
+  const lines = Array.from($('consoleOutput').children).map(el => el.textContent.replace(/^\S+\s/, '')).join('\n');
+  if (!lines) { toast('No console output to copy', 'info'); return; }
+  navigator.clipboard.writeText(lines).then(() => toast('Console logs copied!', 'success')).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = lines;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('Console logs copied!', 'success');
+  });
 }
 
 function sendCmd(e) {
