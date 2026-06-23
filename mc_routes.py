@@ -519,3 +519,17 @@ def register_routes(app, html):
         if ok_:
             return ok({"message": msg})
         return fail(msg)
+
+    @app.route("/api/playit/cli", methods=["POST"])
+    def api_playit_cli():
+        ok_, out, lines = mc_playit.run_cli()
+        if not ok_:
+            return fail(out)
+        url, code = mc_playit.parse_claim_url(lines)
+        result = {"lines": lines, "raw": out}
+        if url:
+            result["claim_url"] = url
+            result["claim_code"] = code
+        if "already claimed" in out.lower() or "agent" in out.lower():
+            result["claimed"] = True
+        return ok(result)

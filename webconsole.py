@@ -1224,15 +1224,9 @@ async function loadTunnel() {
   html += '</div>';
   if (daemonOn && !claimed) {
     html += '<div style="padding:16px;background:#1a2a1a;border:1px solid #2a2a2a;border-radius:8px;margin-top:12px">';
-    html += '<p style="color:#ccc;margin-bottom:8px"><b>1. Get your claim code</b></p>';
-    html += '<p style="color:#888;font-size:13px;margin-bottom:6px">Open a <b>new</b> Termux session and run:</p>';
-    html += '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:6px">playit-cli</code>';
-    html += '<p style="color:#888;font-size:12px">It will output something like: <code style="background:#111;padding:2px 6px;border-radius:3px;color:#64b5f6;font-size:12px">playit.gg/claim/<b style="color:#5ced73">abc123xyz</b></code></p>';
-    html += '<p style="color:#888;font-size:12px;margin-top:4px">The bold part is your claim code.</p>';
-    html += '<p style="color:#ccc;margin:12px 0 8px"><b>2. Enter the code on playit.gg</b></p>';
-    html += '<p style="color:#888;font-size:12px;margin-bottom:6px">Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a>, enter the code, and follow the instructions.</p>';
-    html += '<p style="color:#ccc;margin:12px 0 8px"><b>3. Refresh this page</b></p>';
-    html += '<p style="color:#888;font-size:12px">After claiming, click <b>Refresh</b> above — status will show <b style="color:#5ced73">Online</b>.</p>';
+    html += '<p style="color:#ccc;margin-bottom:10px"><b>Claim your tunnel</b></p>';
+    html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Run playit-cli</button>';
+    html += '<div id="playitCliOutput" style="font-size:12px;color:#888;margin-top:8px"></div>';
     html += '</div>';
   }
   html += '<div id="playitOutput"></div>';
@@ -1250,10 +1244,7 @@ async function startDaemon() {
     const d = await r.json();
     if (d.ok) {
       outDiv.innerHTML = '<p style="color:#5ced73;margin-bottom:8px">Daemon started!</p>'
-        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Open a <b>new</b> Termux session and run:</p>'
-        + '<code style="display:block;background:#111;padding:10px 14px;border-radius:4px;font-size:14px;color:#64b5f6;user-select:all;margin-bottom:6px">playit-cli</code>'
-        + '<p style="color:#888;font-size:12px">It will output something like: <code style="background:#111;padding:2px 6px;border-radius:3px;color:#64b5f6;font-size:12px">playit.gg/claim/<b style="color:#5ced73">CODE</b></code></p>'
-        + '<p style="color:#888;font-size:12px;margin-top:4px">The bold part is your claim code. Open <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a> to enter it.</p>';
+        + '<p style="color:#ccc;font-size:13px;margin-bottom:6px">Now click the <b>Run playit-cli</b> button above to get your claim code.</p>';
     } else {
       outDiv.textContent = d.error || 'Failed.';
     }
@@ -1262,7 +1253,44 @@ async function startDaemon() {
   }
 }
 
-async function installPlayit() {
+async function runPlayitCli() {
+  const btn = $('playitCliBtn');
+  const out = $('playitCliOutput');
+  if (!out) return;
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  out.style.cssText = 'font-size:12px;color:#ccc;margin-top:8px;padding:8px;border-radius:4px;background:#0a0a0a;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto';
+  out.textContent = 'Running playit-cli...';
+  try {
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 40000);
+    const r = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
+    clearTimeout(timeout);
+    const d = await r.json();
+    if (!d.ok) { out.textContent = d.error || 'Failed.'; btn.disabled = false; btn.textContent = 'Run playit-cli'; return; }
+
+    if (d.claim_url && d.claim_code) {
+      out.innerHTML = ''
+        + '<p style="color:#5ced73;margin-bottom:6px">Claim URL found!</p>'
+        + '<p style="margin-bottom:6px"><a href="' + d.claim_url + '" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:6px 14px;font-size:13px">&#x2197; Claim on playit.gg</a></p>'
+        + '<p style="color:#888;font-size:12px;margin-bottom:2px">Your claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:13px;color:#64b5f6;user-select:all">' + d.claim_code + '</code></p>'
+        + '<p style="color:#666;font-size:11px">Open the link above or enter this code at playit.gg/claim.</p>';
+      setTimeout(loadTunnel, 3000);
+    } else {
+      let html = '<p style="color:#f90;margin-bottom:4px">No claim URL found in output.</p>';
+      if (d.lines && d.lines.length) {
+        html += '<div style="font-size:11px;color:#666;margin-bottom:4px">Output:</div><pre style="font-size:11px;color:#555;white-space:pre-wrap;margin:0">';
+        for (const l of d.lines.slice(-15)) html += escapeHtml(l) + '\n';
+        html += '</pre>';
+      }
+      out.innerHTML = html;
+    }
+  } catch(e) {
+    out.textContent = 'Request timed out or failed.';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Run playit-cli';
+}
   const c = $('tunnelContent');
   c.innerHTML = '<div class="search-status">Installing Playit.gg (this may take a moment)...</div>';
   const r = await fetch('/api/playit/install', {method:'POST'});
