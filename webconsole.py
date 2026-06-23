@@ -201,6 +201,7 @@ HTML = r"""<!DOCTYPE html>
     <a href="#" data-page="packs">Mods & Packs</a>
     <a href="#" data-page="files">File Manager</a>
     <a href="#" data-page="backups">Backups</a>
+    <a href="#" data-page="tunnel">Tunnel</a>
   </nav>
 </div>
 <div class="main">
@@ -271,6 +272,9 @@ HTML = r"""<!DOCTYPE html>
         <button class="btn btn-backup" onclick="createBackup()">Create Backup</button>
       </div>
       <div id="backupsList"></div>
+    </div>
+    <div class="page" id="page-tunnel">
+      <div id="tunnelContent" class="loading">Checking tunnel status...</div>
     </div>
   </div>
 </div>
@@ -395,6 +399,7 @@ function showPage(name) {
   if (name === 'properties') loadProperties();
   if (name === 'servers') loadServers();
   if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
+  if (name === 'tunnel') loadTunnel();
 }
 
 // ── Toast ──
@@ -746,6 +751,12 @@ async function deleteServer(sid, name) {
   setInterval(pollStatus, 2000);
   pollStatus();
   loadServers();
+  setInterval(async () => {
+    if (document.getElementById('dashTunnel')) {
+      const td = await get('/api/playit/status');
+      updateTunnelDashboard(td);
+    }
+  }, 10000);
 })();
 async function loadDashboard() {
   if (!_currentServer) {
@@ -761,6 +772,7 @@ async function loadDashboard() {
       <div class="stat-card"><div class="sc-label">Players</div><div class="sc-val" id="dashPlayers" style="color:#b388ff">${d.online_count} / ${d.max_players}</div></div>
       <div class="stat-card"><div class="sc-label">Memory</div><div class="sc-val" id="dashMem" style="color:#5ced73">${d.mem_mb||'—'} MB</div></div>
       <div class="stat-card"><div class="sc-label">Uptime</div><div class="sc-val" id="dashUptime" style="color:#64b5f6;font-size:18px">—</div></div>
+      <div class="stat-card"><div class="sc-label">Tunnel</div><div class="sc-val" id="dashTunnel" style="font-size:14px;color:#888">—</div></div>
     </div>
     <div class="server-actions">
       <button class="btn btn-start" onclick="api('start')">Start Server</button>
@@ -1128,6 +1140,84 @@ async function restoreBackup(name) {
   if (!confirm('Restore this backup? The server will be overwritten.')) return;
   const d = await api('backup/restore', {file: name});
   if (d.ok) toast('Backup restored!', 'success');
+}
+
+// ── Tunnel (Playit.gg) ──
+async function loadTunnel() {
+  const d = await get('/api/playit/status');
+  const c = $('tunnelContent');
+  if (!d.ok) { c.innerHTML = `<div class="search-status">Error loading tunnel status.</div>`; return; }
+  if (!d.installed) {
+    c.innerHTML = `
+      <div class="search-status" style="padding:24px">
+        <p style="margin-bottom:12px">Playit.gg is not installed. It lets you share your Minecraft server online without port forwarding.</p>
+        <button class="btn btn-cmd" onclick="installPlayit()">Install Playit.gg</button>
+      </div>`;
+    return;
+  }
+  const claimed = d.claimed;
+  const running = d.running;
+  const pubIp = d.public_ip;
+  const pubPort = d.public_port;
+  let html = '<div class="status-grid">';
+  const dot = running ? 'green' : 'red';
+  const statusText = running ? 'Running' : 'Stopped';
+  html += `<div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" style="color:${running?'#5ced73':'#ff4444'}">${statusText}</div></div>`;
+  html += `<div class="stat-card"><div class="sc-label">Claimed</div><div class="sc-val" style="color:${claimed?'#5ced73':'#f90'}">${claimed?'Yes':'No'}</div></div>`;
+  if (pubIp) html += `<div class="stat-card"><div class="sc-label">Public IP</div><div class="sc-val" style="color:#64b5f6;font-size:14px">${pubIp}:${pubPort}</div></div>`;
+  if (d.version) html += `<div class="stat-card"><div class="sc-label">Version</div><div class="sc-val" style="font-size:14px;color:#888">${d.version}</div></div>`;
+  html += '</div>';
+  html += '<div class="server-actions">';
+  if (!claimed) html += `<button class="btn btn-cmd" onclick="startPlayit()">Start Tunnel & Get Claim URL</button>`;
+  if (running) html += `<span style="font-size:13px;color:#888;padding:8px">Tunnel is active — your server is online!</span>`;
+  html += `<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>`;
+  html += '</div>';
+  html += '<div id="playitOutput" style="font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap"></div>';
+  c.innerHTML = html;
+  updateTunnelDashboard(d);
+}
+
+async function installPlayit() {
+  const c = $('tunnelContent');
+  c.innerHTML = '<div class="search-status">Installing Playit.gg (this may take a moment)...</div>';
+  const r = await fetch('/api/playit/install', {method:'POST'});
+  const d = await r.json();
+  if (d.ok && d.installed) { toast('Playit installed!', 'success'); loadTunnel(); }
+  else toast('Install failed — try manually: pkg install tur-repo && pkg install playit', 'error');
+}
+
+async function startPlayit() {
+  const c = $('tunnelContent');
+  const out = $('playitOutput');
+  if (!out) { c.innerHTML += '<div id="playitOutput" style="font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap"></div>'; }
+  $('playitOutput').textContent = 'Starting tunnel...';
+  const r = await fetch('/api/playit/start', {method:'POST'});
+  const d = await r.json();
+  if (d.ok && d.claim) {
+    $('playitOutput').innerHTML = `
+      <p style="color:#5ced73;margin-bottom:8px">Tunnel started! Claim it at:</p>
+      <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px">${d.claim}</a>
+      <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions.</p>
+      <p style="color:#888">After claiming, refresh this page to see your tunnel info.</p>`;
+  } else if (d.ok && d.ip) {
+    $('playitOutput').textContent = `Tunnel ready! Public: ${d.ip}:${d.port}`;
+    loadTunnel();
+  } else {
+    $('playitOutput').textContent = d.error || d.message || 'Failed to start tunnel.';
+  }
+}
+
+function updateTunnelDashboard(d) {
+  const tw = document.getElementById('dashTunnel');
+  if (!tw) return;
+  if (d.installed && d.running) {
+    tw.innerHTML = `<span style="color:#5ced73">&#x25cf; Tunnel Online</span>`;
+    if (d.public_ip) tw.innerHTML += `<br><span style="font-size:12px;color:#888">${d.public_ip}:${d.public_port}</span>`;
+  } else if (d.installed && !d.claimed) {
+    tw.innerHTML = `<span style="color:#f90">&#x25cf; Tunnel not claimed</span>`;
+  } else {
+    tw.innerHTML = `<span style="color:#888">&#x25cf; Tunnel offline</span>`;
+  }
 }
 
 // ── Utility ──

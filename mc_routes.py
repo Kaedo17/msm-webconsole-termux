@@ -3,6 +3,7 @@
 import json
 import queue
 import re
+import subprocess
 import tarfile
 import time
 from datetime import datetime
@@ -18,6 +19,7 @@ from mc_properties import PROPS_SCHEMA, save_props
 from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download, list_installed_packs
 from mc_curseforge import curseforge_search as cf_search, curseforge_versions as cf_versions
 import mc_downloads
+import mc_playit
 
 
 def _resolve(sid):
@@ -489,3 +491,31 @@ def register_routes(app, html):
             return fail("File not found.")
         target.unlink()
         return ok({"message": f"Removed {target.name}"})
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  PLAYIT.GG TUNNEL
+    # ═══════════════════════════════════════════════════════════════════
+
+    @app.route("/api/playit/status")
+    def api_playit_status():
+        return ok(mc_playit.check_tunnel_status())
+
+    @app.route("/api/playit/install", methods=["POST"])
+    def api_playit_install():
+        cmds = mc_playit.install_commands()
+        results = []
+        for cmd in cmds:
+            try:
+                subprocess.run(cmd, shell=True, check=True, timeout=120)
+                results.append({"cmd": cmd, "ok": True})
+            except Exception as e:
+                results.append({"cmd": cmd, "ok": False, "error": str(e)})
+        installed = mc_playit.is_installed()
+        return ok({"installed": installed, "steps": results})
+
+    @app.route("/api/playit/start", methods=["POST"])
+    def api_playit_start():
+        ok_, result = mc_playit.start_tunnel()
+        if ok_:
+            return ok(result)
+        return fail(result)
