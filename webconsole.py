@@ -1,33 +1,31 @@
 #!/data/data/com.termux/files/usr/bin/python3
 """
 webconsole.py — Minecraft Web Manager for Termux
-Usage:  python webconsole.py [--dir /path/to/server] [--port 5000]
+Usage:  python webconsole.py [--dir /path/to/servers] [--port 5000]
 
 Modules:
-  mc_state.py     — shared state, config, constants
-  mc_helpers.py   — utility helpers
-  mc_properties.py — server.properties schema & editor
-  mc_modrinth.py  — Modrinth API integration
-  mc_server.py    — server process management
-  mc_routes.py    — all API route definitions
+  mc_state.py       — web app config
+  mc_helpers.py     — utility helpers
+  mc_instances.py   — per-server instance management
+  mc_server.py      — server process management
+  mc_routes.py      — all API route definitions
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-# Add script directory to path so mc_*.py modules are found
 _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 try:
-    from flask import Flask  # type: ignore
+    from flask import Flask
 except ImportError:
     import subprocess
     print("Installing Flask...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
-    from flask import Flask  # type: ignore
+    from flask import Flask
 
 import mc_state
 from mc_state import load_config
@@ -171,14 +169,33 @@ HTML = r"""<!DOCTYPE html>
   .dropzone:hover,.dropzone.dragover{border-color:#5ced73;color:#5ced73;background:#1a2a1a}
   .dropzone input{display:none}
   .upload-progress{font-size:12px;color:#888;margin-top:6px}
+  .server-picker{padding:10px 12px;border-bottom:1px solid #2a2a2a}
+  .server-picker select{width:100%;padding:8px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:13px;outline:none}
+  .server-picker select:focus{border-color:#5ced73}
+  .server-picker .sp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .server-picker .sp-dot.green{background:#5ced73;box-shadow:0 0 4px #5ced7380}
+  .server-picker .sp-dot.red{background:#ff4444;box-shadow:0 0 4px #ff444480}
+  .servers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .server-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:16px;transition:.15s}
+  .server-card:hover{border-color:#444}
+  .server-card h3{font-size:15px;margin-bottom:6px}
+  .server-card .sc-meta{font-size:12px;color:#888}
+  .server-card .sc-meta span{margin-right:12px}
+  .server-card .sc-actions{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
   @media(max-width:768px){.sidebar{display:none}.content{padding:12px}}
 </style>
 </head>
 <body>
 <div class="sidebar">
+  <div class="server-picker">
+    <select id="serverSelect" onchange="onServerChange()">
+      <option value="">— No server selected —</option>
+    </select>
+  </div>
   <h2>Minecraft Console</h2>
   <nav>
     <a href="#" class="active" data-page="dashboard">Dashboard</a>
+    <a href="#" data-page="servers">Servers</a>
     <a href="#" data-page="console">Console</a>
     <a href="#" data-page="properties">Settings</a>
     <a href="#" data-page="packs">Mods & Packs</a>
@@ -196,6 +213,14 @@ HTML = r"""<!DOCTYPE html>
   </div>
   <div class="content" id="mainContent">
     <div class="page active" id="page-dashboard"></div>
+    <div class="page" id="page-servers">
+      <div class="server-actions">
+        <button class="btn btn-cmd" onclick="showCreateServerModal()">Create Server</button>
+        <button class="btn btn-secondary" onclick="showImportModal()">Import Server</button>
+        <button class="btn btn-secondary" onclick="loadServers()">&#x21bb;</button>
+      </div>
+      <div id="serversList" class="loading">Loading servers...</div>
+    </div>
     <div class="page" id="page-console">
       <div class="server-actions">
         <button class="btn btn-start" onclick="api('start')">Start</button>
@@ -296,6 +321,47 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
+<div class="modal" id="createServerModal">
+  <div class="modal-box" style="min-width:400px">
+    <h3>Create Server</h3>
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Server Name</label>
+    <input type="text" id="csName" placeholder="My Server" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Server Type</label>
+    <select id="csType" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+      <option value="vanilla">Vanilla</option>
+      <option value="paper" selected>Paper</option>
+      <option value="purpur">Purpur</option>
+      <option value="spigot">Spigot</option>
+      <option value="forge">Forge</option>
+      <option value="fabric">Fabric</option>
+      <option value="neoforge">NeoForge</option>
+      <option value="quilt">Quilt</option>
+      <option value="folia">Folia</option>
+    </select>
+    <div style="display:flex;gap:12px;margin-top:10px">
+      <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="text" id="csMinRam" value="512M" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
+      <div style="flex:1"><label style="font-size:13px;color:#888">Max RAM</label><input type="text" id="csMaxRam" value="2G" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
+      <button class="btn btn-start" onclick="doCreateServer()">Create</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="importModal">
+  <div class="modal-box" style="min-width:400px">
+    <h3>Import Server</h3>
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Server Folder Path</label>
+    <input type="text" id="impPath" placeholder="/path/to/server/folder" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Name (optional)</label>
+    <input type="text" id="impName" placeholder="My Server" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+    <div style="font-size:12px;color:#666;margin-top:6px">The folder should contain a server .jar file.</div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn btn-save" onclick="doImportServer()">Import</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -303,6 +369,8 @@ let statusPoll = null;
 let consoleStream = null;
 let currentFile = null;
 let currentFilePath = null;
+let _currentServer = '';
+let _serverStartedAt = null;
 
 function $(id){return document.getElementById(id)}
 
@@ -324,6 +392,7 @@ function showPage(name) {
   if (name === 'backups') loadBackups();
   if (name === 'dashboard') loadDashboard();
   if (name === 'properties') loadProperties();
+  if (name === 'servers') loadServers();
   if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
 }
 
@@ -339,7 +408,8 @@ function toast(msg, type='info') {
 async function api(method, body) {
   const opts = {method:'POST'};
   if (body) opts.body = JSON.stringify(body), opts.headers = {'Content-Type':'application/json'};
-  const r = await fetch(`/api/${method}`, opts);
+  const prefix = _currentServer ? `/api/servers/${_currentServer}/` : '/api/';
+  const r = await fetch(`${prefix}${method}`, opts);
   const d = await r.json();
   if (!d.ok) toast(d.error, 'error');
   else if (d.message) toast(d.message, 'success');
@@ -347,6 +417,9 @@ async function api(method, body) {
 }
 
 async function get(path) {
+  if (path.startsWith('/api/') && !path.startsWith('/api/servers/') && _currentServer) {
+    path = `/api/servers/${_currentServer}/${path.replace('/api/', '')}`;
+  }
   const r = await fetch(path);
   return r.json();
 }
@@ -355,7 +428,8 @@ async function uploadFile(file, dest) {
   const fd = new FormData();
   fd.append('file', file);
   if (dest) fd.append('dest', dest);
-  const r = await fetch('/api/upload', {method:'POST', body: fd});
+  const url = _currentServer ? `/api/servers/${_currentServer}/upload` : '/api/upload/app';
+  const r = await fetch(url, {method:'POST', body: fd});
   const d = await r.json();
   if (!d.ok) toast(d.error || 'Upload failed', 'error');
   else toast(d.message || 'Uploaded', 'success');
@@ -457,7 +531,7 @@ function updateStatus(data) {
   _lastStatus = data;
   const dot = $('statusDot');
   const label = $('statusLabel');
-  if (data.online) {
+  if (data && data.online) {
     dot.className = 'dot green';
     label.textContent = 'Running';
     label.style.color = '#5ced73';
@@ -466,9 +540,9 @@ function updateStatus(data) {
     label.textContent = 'Stopped';
     label.style.color = '#ff4444';
   }
-  $('memStat').textContent = data.mem_mb ? `${data.mem_mb} MB` : '— MB';
-  $('playerStat').textContent = `${data.online_count}/${data.max_players} online`;
-  if (data.online && data.started_at) {
+  $('memStat').textContent = (data && data.mem_mb) ? `${data.mem_mb} MB` : '— MB';
+  $('playerStat').textContent = (data && data.online != null) ? `${data.online_count}/${data.max_players} online` : '—';
+  if (data && data.online && data.started_at) {
     _uptimeStart = new Date(data.started_at).getTime();
   } else {
     _uptimeStart = null;
@@ -510,19 +584,127 @@ function updateDashboardLive(data) {
 }
 
 async function pollStatus() {
+  if (!_currentServer) { updateStatus(null); return; }
   try {
     const d = await get('/api/status');
     updateStatus(d);
   } catch(e) {}
 }
 
-setInterval(pollStatus, 2000);
-pollStatus();
+// ── Server Management ──
 
-// ── Dashboard ──
+async function loadServers() {
+  const d = await get('/api/servers');
+  const container = $('serversList');
+  if (!d.ok || !d.servers) { container.innerHTML = '<div class="search-status">Failed to load servers.</div>'; return; }
+  const sel = $('serverSelect');
+  sel.innerHTML = '';
+  let html = '<div class="servers-grid">';
+  for (const s of d.servers) {
+    const dot = s.online ? '<span class="sp-dot green"></span>' : '<span class="sp-dot red"></span>';
+    const onlineTxt = s.online ? 'Running' : 'Stopped';
+    sel.innerHTML += `<option value="${s.id}" ${s.id===_currentServer?'selected':''}>${dot}${s.name}</option>`;
+    html += `<div class="server-card">
+      <h3>${dot}${escapeHtml(s.name)}</h3>
+      <div class="sc-meta">
+        <span>${s.jar_type}</span>
+        <span>Port ${s.port}</span>
+        <span>${onlineTxt}</span>
+      </div>
+      <div class="sc-actions">
+        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="selectServer('${s.id}')">Manage</button>
+        <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="deleteServer('${s.id}','${escapeHtml(s.name)}')">Delete</button>
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+  if (!d.servers.length) container.innerHTML = '<div class="search-status">No servers yet. Create or import one above.</div>';
+}
+
+function selectServer(sid) {
+  _currentServer = sid;
+  $('serverSelect').value = sid;
+  if (consoleStream) { consoleStream.close(); consoleStream = null; }
+  if (!$('page-servers').classList.contains('active')) {
+    showPage('dashboard');
+  }
+  pollStatus();
+  loadServers();
+  toast(`Selected server`, 'success');
+}
+
+function onServerChange() {
+  const sid = $('serverSelect').value;
+  if (!sid) return;
+  _currentServer = sid;
+  if (consoleStream) { consoleStream.close(); consoleStream = null; }
+  showPage('dashboard');
+  pollStatus();
+  loadServers();
+}
+
+function showCreateServerModal() { $('createServerModal').classList.add('show'); }
+
+async function doCreateServer() {
+  const name = $('csName').value.trim();
+  if (!name) { toast('Enter a server name', 'error'); return; }
+  const jt = $('csType').value;
+  const minRam = $('csMinRam').value.trim().toUpperCase();
+  const maxRam = $('csMaxRam').value.trim().toUpperCase();
+  closeModal('createServerModal');
+  const d = await api('servers', {name, jar_type: jt, min_ram: minRam, max_ram: maxRam});
+  if (d.ok) loadServers();
+}
+
+function showImportModal() { $('importModal').classList.add('show'); }
+
+async function doImportServer() {
+  const path = $('impPath').value.trim();
+  if (!path) { toast('Enter a folder path', 'error'); return; }
+  const name = $('impName').value.trim() || undefined;
+  closeModal('importModal');
+  const r = await fetch('/api/servers/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, name})});
+  const rd = await r.json();
+  if (rd.ok) { toast(rd.message || 'Imported', 'success'); loadServers(); }
+  else toast(rd.error || 'Import failed', 'error');
+}
+
+async function deleteServer(sid, name) {
+  if (!confirm(`Delete server '${name}'? This will delete all files permanently!`)) return;
+  const r = await fetch(`/api/servers/${sid}`, {method:'DELETE'});
+  const d = await r.json();
+  if (d.ok) {
+    toast(`Deleted '${name}'`, 'success');
+    if (_currentServer === sid) {
+      _currentServer = '';
+      _lastStatus = null;
+      updateStatus(null);
+    }
+    loadServers();
+  } else toast(d.error, 'error');
+}
+
+// Init
+(async function init() {
+  const d = await get('/api/servers');
+  if (d.ok && d.servers && d.servers.length) {
+    _currentServer = d.servers[0].id;
+    const sel = $('serverSelect');
+    if (sel) sel.value = _currentServer;
+  }
+  setInterval(pollStatus, 2000);
+  pollStatus();
+  loadServers();
+})();
 async function loadDashboard() {
+  if (!_currentServer) {
+    $('page-dashboard').innerHTML = '<div class="search-status" style="padding:40px;font-size:16px">Select a server from the sidebar to view its dashboard.</div>';
+    return;
+  }
   const d = _lastStatus || await get('/api/status');
   const pg = $('page-dashboard');
+  if (!d || !d.ok) { pg.innerHTML = '<div class="search-status">No status available.</div>'; return; }
   pg.innerHTML = `
     <div class="status-grid">
       <div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" id="dashStatus" style="color:${d.online?'#5ced73':'#ff4444'}">${d.online?'Running':'Stopped'}</div></div>
@@ -750,8 +932,9 @@ async function removePack(path, name) {
 // ── Console ──
 function setupConsole() {
   if (consoleStream) return;
+  if (!_currentServer) { toast('Select a server first', 'info'); return; }
   const out = $('consoleOutput');
-  const es = new EventSource('/api/console');
+  const es = new EventSource(`/api/servers/${_currentServer}/console`);
   consoleStream = es;
   es.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -904,8 +1087,6 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-// Init
-loadDashboard();
 </script>
 </body>
 </html>
@@ -915,7 +1096,7 @@ loadDashboard();
 #  Import routes (registers them on app; app & HTML must be defined first)
 # ═══════════════════════════════════════════════════════════════════════
 
-from mc_server import start_polling  # noqa: E402
+import mc_state
 from mc_routes import register_routes  # noqa: E402
 
 register_routes(app, HTML)
@@ -927,28 +1108,25 @@ register_routes(app, HTML)
 
 def main():
     ap = argparse.ArgumentParser(description="Minecraft Web Manager for Termux")
-    ap.add_argument("--dir", help=f"Server directory (current: {mc_state.SERVER_DIR})")
     ap.add_argument("--port", type=int, help=f"Web port (default: {mc_state.PORT})")
     ap.add_argument("--host", help=f"Bind address (default: {mc_state.HOST})")
     args = ap.parse_args()
-    if args.dir:
-        mc_state.SERVER_DIR = Path(args.dir).resolve()
     if args.port:
         mc_state.PORT = args.port
     if args.host:
         mc_state.HOST = args.host
 
-    if not mc_state.SERVER_DIR.exists():
-        print(f"[!] Server directory does not exist: {mc_state.SERVER_DIR}")
-        sys.exit(1)
+    import mc_instances as mci
+    mci.load_registry()
 
-    load_config()
-    start_polling()
+    if not mci.all_servers():
+        print(" No Minecraft servers found in ~/mc-servers/")
+        print(" Create one from the web UI at http://localhost:5000")
+        print(" Or import an existing server folder there.")
+        print()
 
     print(f" Minecraft Web Manager")
-    print(f"  Server directory: {mc_state.SERVER_DIR}")
     print(f"  Web URL:          http://localhost:{mc_state.PORT}")
-    print(f"  Start server:     Open browser and click Start")
     print()
 
     app.run(host=mc_state.HOST, port=mc_state.PORT, debug=False, use_reloader=False)

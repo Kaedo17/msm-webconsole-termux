@@ -69,16 +69,16 @@ def modrinth_download(file_url, dest_path):
     return dest_path
 
 
-def list_installed_packs():
+def list_installed_packs(server_dir):
     result = []
     for sub, pack_type in [("mods", "mod"), ("resourcepacks", "resourcepack")]:
-        d = mc_state.SERVER_DIR / sub
+        d = server_dir / sub
         if d.exists():
             for f in sorted(d.iterdir()):
                 if f.suffix in (".jar", ".zip"):
                     result.append({
                         "name": f.name,
-                        "path": str(f.relative_to(mc_state.SERVER_DIR)),
+                        "path": str(f.relative_to(server_dir)),
                         "size": f.stat().st_size,
                         "type": pack_type,
                     })

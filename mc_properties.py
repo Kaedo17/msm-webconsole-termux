@@ -1,7 +1,5 @@
 """Minecraft server.properties schema and editor."""
 
-import mc_state
-
 PROPS_SCHEMA = {
     "online-mode":           {"type": "bool",   "cat": "server",   "label": "Online Mode",       "desc": "Authenticate players with Mojang"},
     "difficulty":            {"type": "enum",   "cat": "gameplay", "label": "Difficulty",         "desc": "Game difficulty", "opts": ["peaceful","easy","normal","hard"]},
@@ -40,8 +38,8 @@ PROPS_SCHEMA = {
 }
 
 
-def save_props(changes):
-    pf = mc_state.SERVER_DIR / "server.properties"
+def save_props(server_dir, changes):
+    pf = server_dir / "server.properties"
     if not pf.exists():
         return False, "server.properties not found"
     lines = pf.read_text(encoding="utf-8").splitlines(keepends=True)

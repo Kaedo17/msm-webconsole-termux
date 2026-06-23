@@ -1,4 +1,4 @@
-"""All API route definitions for the Minecraft web console."""
+"""All API route definitions for the multi-server web console."""
 
 import json
 import queue
@@ -10,110 +10,158 @@ from datetime import datetime
 from flask import request, Response  # type: ignore
 from werkzeug.utils import secure_filename  # type: ignore
 
+import mc_instances as mci
 import mc_state
-from mc_helpers import (
-    ok, fail, is_running, safe_resolve, parse_json_body,
-    find_jar, get_props,
-)
-from mc_server import start_minecraft, stop_minecraft, send_minecraft
+from mc_helpers import ok, fail, parse_json_body, safe_resolve, get_props
+from mc_server import start_server, stop_server, send_server
 from mc_properties import PROPS_SCHEMA, save_props
 from mc_modrinth import modrinth_search, modrinth_versions, modrinth_download, list_installed_packs
 from mc_curseforge import curseforge_search as cf_search, curseforge_versions as cf_versions
 
 
-def register_routes(app, html):
+def _resolve(sid):
+    inst = mci.get_server(sid)
+    if not inst:
+        return None
+    return inst
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  INDEX
-    # ═══════════════════════════════════════════════════════════════════
+
+def register_routes(app, html):
 
     @app.route("/")
     def index():
         return html
 
     # ═══════════════════════════════════════════════════════════════════
+    #  SERVER REGISTRY
+    # ═══════════════════════════════════════════════════════════════════
+
+    @app.route("/api/servers", methods=["GET", "POST"])
+    def api_servers():
+        if request.method == "GET":
+            return ok({"servers": [s.to_dict() for s in mci.all_servers()]})
+        data = parse_json_body()
+        name = data.get("name", "").strip()
+        if not name:
+            return fail("Server name required.")
+        jt = data.get("jar_type", "vanilla")
+        mr = data.get("min_ram", "512M").strip().upper()
+        mx = data.get("max_ram", "2G").strip().upper()
+        if not re.match(r"^\d+[MG]$", mr) or not re.match(r"^\d+[MG]$", mx):
+            return fail("Invalid RAM format.")
+        inst = mci.create_server(name, jt, mr, mx)
+        return ok({"message": f"Server '{name}' created.", "server": inst.to_dict()})
+
+    @app.route("/api/servers/import", methods=["POST"])
+    def api_server_import():
+        data = parse_json_body()
+        path = data.get("path", "").strip()
+        name = data.get("name", "").strip() or None
+        if not path:
+            return fail("Path required.")
+        inst, msg = mci.import_server(path, name)
+        if inst is None:
+            return fail(msg)
+        return ok({"message": msg, "server": inst.to_dict()})
+
+    @app.route("/api/servers/<sid>", methods=["GET", "DELETE"])
+    def api_server(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        if request.method == "DELETE":
+            ok_, msg = mci.delete_server(sid)
+            return ok({"message": msg}) if ok_ else fail(msg)
+        return ok({"server": inst.to_dict()})
+
+    # ═══════════════════════════════════════════════════════════════════
     #  SERVER LIFECYCLE
     # ═══════════════════════════════════════════════════════════════════
 
-    @app.route("/api/status")
-    def api_status():
-        with mc_state.get_status_lock():
-            players = list(mc_state.status_cache["players"])
-            online_count = len(players)
-        props = get_props()
-        return ok({
-            "online": mc_state.status_cache["online"],
-            "players": players,
-            "online_count": online_count,
-            "max_players": int(props.get("max-players", 20)),
-            "mem_mb": mc_state.status_cache["mem_mb"],
-            "uptime": mc_state.status_cache["uptime"],
-            "started_at": mc_state.status_cache["started_at"],
-            "jar": str(find_jar() or ""),
-            "server_dir": str(mc_state.SERVER_DIR),
-            "min_ram": mc_state.MIN_RAM,
-            "max_ram": mc_state.MAX_RAM,
-        })
+    @app.route("/api/servers/<sid>/status")
+    def api_status(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        props = get_props(inst.dir)
+        s = inst.status_dict()
+        s["max_players"] = int(props.get("max-players", 20))
+        s["server_port"] = int(props.get("server-port", inst.port))
+        return ok(s)
 
-    @app.route("/api/ram", methods=["GET", "POST"])
-    def api_ram():
+    @app.route("/api/servers/<sid>/ram", methods=["GET", "POST"])
+    def api_ram(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         if request.method == "GET":
-            return ok({"min_ram": mc_state.MIN_RAM, "max_ram": mc_state.MAX_RAM})
+            return ok({"min_ram": inst.min_ram, "max_ram": inst.max_ram})
         data = parse_json_body()
         new_min = data.get("min_ram", "").strip().upper()
         new_max = data.get("max_ram", "").strip().upper()
         if not re.match(r"^\d+[MG]$", new_min) or not re.match(r"^\d+[MG]$", new_max):
-            return fail("Invalid RAM format. Use e.g. 512M, 1G, 2G, 4G")
-        if is_running():
+            return fail("Invalid RAM format.")
+        if inst.is_running():
             return fail("Stop the server before changing RAM.")
-        mc_state.MIN_RAM = new_min
-        mc_state.MAX_RAM = new_max
-        mc_state.save_config()
-        return ok({"message": f"RAM set to {mc_state.MIN_RAM} min / {mc_state.MAX_RAM} max",
-                   "min_ram": mc_state.MIN_RAM, "max_ram": mc_state.MAX_RAM})
+        inst.min_ram = new_min
+        inst.max_ram = new_max
+        inst.save_config()
+        return ok({"message": f"RAM set to {inst.min_ram} min / {inst.max_ram} max"})
 
-    @app.route("/api/start", methods=["POST"])
-    def api_start():
-        ok_, msg = start_minecraft()
+    @app.route("/api/servers/<sid>/start", methods=["POST"])
+    def api_start(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        ok_, msg = start_server(inst)
         return ok({"message": msg}) if ok_ else fail(msg)
 
-    @app.route("/api/stop", methods=["POST"])
-    def api_stop():
+    @app.route("/api/servers/<sid>/stop", methods=["POST"])
+    def api_stop(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        ok_, msg = stop_minecraft(int(data.get("seconds", 15)))
+        ok_, msg = stop_server(inst, int(data.get("seconds", 15)))
         return ok({"message": msg}) if ok_ else fail(msg)
 
-    @app.route("/api/restart", methods=["POST"])
-    def api_restart():
+    @app.route("/api/servers/<sid>/restart", methods=["POST"])
+    def api_restart(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        stop_minecraft(int(data.get("seconds", 15)))
+        stop_server(inst, int(data.get("seconds", 15)))
         time.sleep(2)
-        ok_, msg = start_minecraft()
+        ok_, msg = start_server(inst)
         return ok({"message": msg}) if ok_ else fail(msg)
 
-    @app.route("/api/command", methods=["POST"])
-    def api_command():
+    @app.route("/api/servers/<sid>/command", methods=["POST"])
+    def api_command(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
         cmd = data.get("command", "").strip()
         if not cmd:
             return fail("No command provided.")
-        ok_, msg = send_minecraft(cmd)
+        ok_, msg = send_server(inst, cmd)
         return ok({"message": msg}) if ok_ else fail(msg)
 
     # ═══════════════════════════════════════════════════════════════════
-    #  CONSOLE (SSE)
+    #  CONSOLE (SSE) — per-server
     # ═══════════════════════════════════════════════════════════════════
 
-    _console_connections = 0
+    @app.route("/api/servers/<sid>/console")
+    def api_console(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
 
-    @app.route("/api/console")
-    def api_console():
         def stream():
-            nonlocal _console_connections
-            _console_connections += 1
-            q = mc_state.console_queue
+            q = inst.console_queue
             try:
-                hist = mc_state.console_history
+                hist = inst.console_history
                 if hist:
                     try:
                         yield f"data: {json.dumps({'type': 'history', 'lines': hist[:]})}\n\n"
@@ -132,9 +180,6 @@ def register_routes(app, html):
                         yield ": heartbeat\n\n"
             except Exception:
                 pass
-            finally:
-                if _console_connections > 0:
-                    _console_connections -= 1
 
         resp = Response(stream(), mimetype="text/event-stream")
         resp.headers["Cache-Control"] = "no-cache"
@@ -143,38 +188,47 @@ def register_routes(app, html):
         return resp
 
     # ═══════════════════════════════════════════════════════════════════
-    #  FILE MANAGER
+    #  FILE MANAGER — per-server
     # ═══════════════════════════════════════════════════════════════════
 
-    @app.route("/api/files")
-    def api_files():
-        path_str = request.args.get("path", "")
-        target = safe_resolve(path_str)
+    def _file_list(inst, path_str=""):
+        target = safe_resolve(inst.dir, path_str)
         if target is None:
-            return fail("Access denied.")
+            return None, "Access denied."
         if target.is_dir():
             items = []
             for entry in sorted(target.iterdir()):
                 items.append({
                     "name": entry.name,
-                    "path": str(entry.relative_to(mc_state.SERVER_DIR)),
+                    "path": str(entry.relative_to(inst.dir)),
                     "is_dir": entry.is_dir(),
                     "size": entry.stat().st_size if entry.is_file() else 0,
                     "modified": datetime.fromtimestamp(entry.stat().st_mtime).isoformat(),
                 })
-            return ok({"items": items, "current": str(target.relative_to(mc_state.SERVER_DIR))})
+            return ok({"items": items, "current": str(target.relative_to(inst.dir))}), None
         elif target.is_file():
             try:
                 content = target.read_text(encoding="utf-8", errors="replace")
-                return ok({"content": content, "path": str(target.relative_to(mc_state.SERVER_DIR)), "name": target.name})
+                return ok({"content": content, "path": str(target.relative_to(inst.dir)), "name": target.name}), None
             except Exception as e:
-                return fail(str(e))
-        return fail("Path not found.")
+                return None, str(e)
+        return None, "Path not found."
 
-    @app.route("/api/file/save", methods=["POST"])
-    def api_file_save():
+    @app.route("/api/servers/<sid>/files")
+    def api_files(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        r, err = _file_list(inst, request.args.get("path", ""))
+        return r if r else fail(err)
+
+    @app.route("/api/servers/<sid>/file/save", methods=["POST"])
+    def api_file_save(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        target = safe_resolve(data.get("path", ""))
+        target = safe_resolve(inst.dir, data.get("path", ""))
         if target is None:
             return fail("Access denied.")
         try:
@@ -183,41 +237,19 @@ def register_routes(app, html):
         except Exception as e:
             return fail(str(e))
 
-    @app.route("/api/upload", methods=["POST"])
-    def api_upload():
-        if "file" not in request.files:
-            return fail("No file provided.")
-        f = request.files["file"]
-        if not f.filename:
-            return fail("No filename.")
-        filename = secure_filename(f.filename)
-        if not filename:
-            filename = "uploaded_file"
-        dest_dir_str = request.form.get("dest", "")
-        dest_dir = safe_resolve(dest_dir_str) if dest_dir_str else mc_state.SERVER_DIR
-        if dest_dir is None:
-            return fail("Access denied.")
-        if not dest_dir.exists():
-            dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / filename
-        try:
-            f.save(str(dest))
-            rel = str(dest.relative_to(mc_state.SERVER_DIR))
-            return ok({"message": f"Uploaded {filename}", "path": rel, "name": filename,
-                       "size": dest.stat().st_size})
-        except Exception as e:
-            return fail(f"Upload failed: {e}")
-
-    @app.route("/api/file/delete", methods=["POST"])
-    def api_file_delete():
+    @app.route("/api/servers/<sid>/file/delete", methods=["POST"])
+    def api_file_delete(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        target = safe_resolve(data.get("path", ""))
+        target = safe_resolve(inst.dir, data.get("path", ""))
         if target is None:
             return fail("Access denied.")
         if not target.exists():
             return fail("File or folder not found.")
-        if target == mc_state.SERVER_DIR.resolve():
-            return fail("Cannot delete the server root directory.")
+        if target == inst.dir.resolve():
+            return fail("Cannot delete server root.")
         try:
             if target.is_dir():
                 import shutil
@@ -228,24 +260,54 @@ def register_routes(app, html):
         except Exception as e:
             return fail(f"Delete failed: {e}")
 
+    @app.route("/api/servers/<sid>/upload", methods=["POST"])
+    def api_upload(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        if "file" not in request.files:
+            return fail("No file provided.")
+        f = request.files["file"]
+        if not f.filename:
+            return fail("No filename.")
+        filename = secure_filename(f.filename)
+        if not filename:
+            filename = "uploaded_file"
+        dest_dir_str = request.form.get("dest", "")
+        dest_dir = safe_resolve(inst.dir, dest_dir_str) if dest_dir_str else inst.dir
+        if dest_dir is None:
+            return fail("Access denied.")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / filename
+        try:
+            f.save(str(dest))
+            rel = str(dest.relative_to(inst.dir))
+            return ok({"message": f"Uploaded {filename}", "path": rel, "name": filename,
+                       "size": dest.stat().st_size})
+        except Exception as e:
+            return fail(f"Upload failed: {e}")
+
     # ═══════════════════════════════════════════════════════════════════
-    #  BACKUPS
+    #  BACKUPS — per-server
     # ═══════════════════════════════════════════════════════════════════
 
-    @app.route("/api/backup", methods=["POST"])
-    def api_backup():
-        worlds = [d for d in mc_state.SERVER_DIR.iterdir()
+    @app.route("/api/servers/<sid>/backup", methods=["POST"])
+    def api_backup(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        worlds = [d for d in inst.dir.iterdir()
                   if d.is_dir() and ("world" in d.name.lower() or d.name.endswith("-world"))]
         if not worlds:
             return fail("No world directories found.")
-        if is_running():
+        if inst.is_running():
             try:
-                mc_state.server_proc.stdin.write("save-all\n")
-                mc_state.server_proc.stdin.flush()
+                inst.proc.stdin.write("save-all\n")
+                inst.proc.stdin.flush()
             except Exception:
                 pass
             time.sleep(2)
-        backup_dir = mc_state.SERVER_DIR / "backups"
+        backup_dir = inst.dir / "backups"
         backup_dir.mkdir(exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         archive = backup_dir / f"world-backup-{ts}.tar.gz"
@@ -255,9 +317,12 @@ def register_routes(app, html):
         size = archive.stat().st_size
         return ok({"message": f"Backup created ({size // 1024} KB)", "file": archive.name})
 
-    @app.route("/api/backups")
-    def api_backups():
-        backup_dir = mc_state.SERVER_DIR / "backups"
+    @app.route("/api/servers/<sid>/backups")
+    def api_backups(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        backup_dir = inst.dir / "backups"
         if not backup_dir.exists():
             return ok({"backups": []})
         files = []
@@ -269,26 +334,32 @@ def register_routes(app, html):
             })
         return ok({"backups": files})
 
-    @app.route("/api/backup/restore", methods=["POST"])
-    def api_backup_restore():
+    @app.route("/api/servers/<sid>/backup/restore", methods=["POST"])
+    def api_backup_restore(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        archive = safe_resolve("backups/" + data.get("file", ""))
+        archive = safe_resolve(inst.dir, "backups/" + data.get("file", ""))
         if archive is None or not archive.exists():
             return fail("Backup not found.")
-        if is_running():
+        if inst.is_running():
             return fail("Stop the server before restoring a backup.")
         with tarfile.open(str(archive), "r:gz") as tar:
-            tar.extractall(path=str(mc_state.SERVER_DIR))
+            tar.extractall(path=str(inst.dir))
         return ok({"message": f"Restored from {data.get('file')}."})
 
     # ═══════════════════════════════════════════════════════════════════
-    #  PROPERTIES EDITOR
+    #  PROPERTIES EDITOR — per-server
     # ═══════════════════════════════════════════════════════════════════
 
-    @app.route("/api/properties", methods=["GET", "POST"])
-    def api_properties():
+    @app.route("/api/servers/<sid>/properties", methods=["GET", "POST"])
+    def api_properties(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         if request.method == "GET":
-            props = get_props()
+            props = get_props(inst.dir)
             rich = {}
             for k, v in props.items():
                 entry = dict(PROPS_SCHEMA.get(k, {"type": "string", "cat": "other", "label": k, "desc": ""}))
@@ -302,22 +373,24 @@ def register_routes(app, html):
                     entry["value"] = s.get("default", "")
                     rich[k] = entry
             return ok({"properties": list(rich.values())})
-
         data = parse_json_body()
         changes = data.get("changes", {})
         if not changes:
             return fail("No changes provided.")
-        if is_running():
-            return fail("Stop the server for some property changes to take effect, or restart after saving.")
-        ok_, msg = save_props(changes)
+        if inst.is_running():
+            return fail("Stop the server for some property changes to take effect.")
+        ok_, msg = save_props(inst.dir, changes)
         return ok({"message": msg}) if ok_ else fail(msg)
 
     # ═══════════════════════════════════════════════════════════════════
-    #  MODPACKS / RESOURCE PACKS
+    #  MODPACKS / RESOURCE PACKS — per-server
     # ═══════════════════════════════════════════════════════════════════
 
-    @app.route("/api/packs/search")
-    def api_packs_search():
+    @app.route("/api/servers/<sid>/packs/search")
+    def api_packs_search(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         q = request.args.get("q", "")
         pt = request.args.get("type", "modpack")
         prov = request.args.get("provider", "modrinth")
@@ -333,8 +406,11 @@ def register_routes(app, html):
             return fail(results["error"])
         return ok({"results": results, "provider": prov, "type": pt})
 
-    @app.route("/api/packs/versions")
-    def api_packs_versions():
+    @app.route("/api/servers/<sid>/packs/versions")
+    def api_packs_versions(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         pid = request.args.get("id", "")
         pt = request.args.get("type", "mod")
         prov = request.args.get("provider", "modrinth")
@@ -350,33 +426,42 @@ def register_routes(app, html):
             return fail(versions["error"])
         return ok({"versions": versions})
 
-    @app.route("/api/packs/install", methods=["POST"])
-    def api_packs_install():
+    @app.route("/api/servers/<sid>/packs/install", methods=["POST"])
+    def api_packs_install(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
         file_url = data.get("file_url", "")
         filename = data.get("filename", "pack.zip")
         pack_type = data.get("type", "modpack")
         if not file_url:
             return fail("No file URL provided.")
-        dest_dir = mc_state.SERVER_DIR / ("resourcepacks" if pack_type == "resourcepack" else "mods")
+        dest_dir = inst.dir / ("resourcepacks" if pack_type == "resourcepack" else "mods")
         dest = dest_dir / filename
         try:
             modrinth_download(file_url, dest)
-            return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(mc_state.SERVER_DIR))})
+            return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(inst.dir))})
         except Exception as e:
             err = str(e)
             if "403" in err or "Forbidden" in err:
                 return jsonify({"ok": False, "error": "blocked", "url": file_url, "filename": filename}), 200
             return fail(f"Download failed: {err}")
 
-    @app.route("/api/packs/installed")
-    def api_packs_installed():
-        return ok({"packs": list_installed_packs()})
+    @app.route("/api/servers/<sid>/packs/installed")
+    def api_packs_installed(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        return ok({"packs": list_installed_packs(inst.dir)})
 
-    @app.route("/api/packs/remove", methods=["POST"])
-    def api_packs_remove():
+    @app.route("/api/servers/<sid>/packs/remove", methods=["POST"])
+    def api_packs_remove(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
         data = parse_json_body()
-        target = safe_resolve(data.get("path", ""))
+        target = safe_resolve(inst.dir, data.get("path", ""))
         if target is None:
             return fail("Access denied.")
         if not target.exists():
