@@ -1244,7 +1244,7 @@ async function startPlayit() {
   outDiv.textContent = 'Starting tunnel (this may take a minute)...';
   try {
     const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 60000);
+    const timeout = setTimeout(() => ac.abort(), 40000);
     const r = await fetch('/api/playit/start', {method:'POST', signal: ac.signal});
     clearTimeout(timeout);
     const d = await r.json();

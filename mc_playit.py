@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -83,16 +84,24 @@ def start_tunnel(timeout=30):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True, bufsize=1,
         )
+        output = []
+        done = threading.Event()
+
+        def reader():
+            for line in iter(proc.stdout.readline, ""):
+                output.append(line.rstrip("\n\r"))
+            done.set()
+
+        thr = threading.Thread(target=reader, daemon=True)
+        thr.start()
+
         lines = []
         claim_url = None
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            ret = proc.poll()
-            out_line = proc.stdout.readline() if proc.stdout else ""
-            err_line = proc.stderr.readline() if proc.stderr else ""
-            line = (out_line or err_line).strip()
-            if line:
+            while output:
+                line = output.pop(0)
                 lines.append(line)
                 m = re.search(r'https://playit\.gg/claim/(\S+)', line)
                 if m:
@@ -107,9 +116,11 @@ def start_tunnel(timeout=30):
                     return True, {"ip": m.group(1), "port": m.group(2), "lines": lines}
                 if "already running" in line.lower():
                     return True, {"message": "Already running.", "lines": lines}
-            if ret is not None and not out_line and not err_line:
+            if claim_url:
                 break
-            time.sleep(0.3)
+            if done.is_set():
+                break
+            time.sleep(0.2)
 
         proc.kill()
         proc.wait(timeout=5)
