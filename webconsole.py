@@ -1272,13 +1272,6 @@ async function startPlayit() {
     $('playitOutput').textContent = 'Request timed out or failed. Try again.';
   }
 }
-    if (d.lines && d.lines.length) {
-      outDiv.textContent += '\n\nOutput:\n' + d.lines.join('\n');
-    }
-  } catch(e) {
-    $('playitOutput').textContent = 'Request timed out or failed. Try again.';
-  }
-}
 
 function updateTunnelDashboard(d) {
   const tw = document.getElementById('dashTunnel');
