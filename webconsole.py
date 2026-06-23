@@ -102,6 +102,11 @@ HTML = r"""<!DOCTYPE html>
   .file-tree .fi-del{float:right;color:#555;cursor:pointer;font-size:11px;padding:0 4px;border-radius:3px;opacity:0;transition:.15s}
   .file-tree .fi:hover .fi-del{opacity:1}
   .file-tree .fi-del:hover{color:#ff4444;background:#2a1a1a}
+  .file-tree .fi-act{float:right;display:inline-flex;gap:2px;opacity:0;transition:.15s;margin-left:8px}
+  .file-tree .fi:hover .fi-act{opacity:1}
+  .file-tree .fi-act span{padding:0 4px;border-radius:3px;cursor:pointer;color:#555;font-size:11px}
+  .file-tree .fi-act span:hover{color:#4fc3f7;background:#1a2a3a}
+  .file-tree .fi-act span.fi-mv:hover{color:#ffd54f;background:#2a2a1a}
   .file-editor{flex:1;display:flex;flex-direction:column}
   .file-editor .fe-header{padding:8px 16px;background:#151515;border-bottom:1px solid #2a2a2a;font-size:13px;color:#888;display:flex;justify-content:space-between;align-items:center}
   .file-editor textarea{flex:1;background:#0d0d0d;border:none;color:#e0e0e0;font-family:monospace;font-size:13px;padding:12px 16px;resize:none;outline:none;tab-size:2}
@@ -1238,18 +1243,39 @@ function doStop() { closeModal('stopModal'); api('stop', {seconds: parseInt($('s
 function doRestart() { closeModal('restartModal'); api('restart', {seconds: parseInt($('restartSeconds').value) || 15}) }
 
 // ── File Manager ──
+let _fileCurrentDir = '';
+
+function parentDir(path) {
+  if (!path) return '';
+  const parts = path.replace(/\\/g,'/').split('/');
+  parts.pop();
+  return parts.join('/');
+}
+
+function dirName(path) {
+  if (!path) return '';
+  const parts = path.replace(/\\/g,'/').split('/');
+  return parts.pop();
+}
+
 async function loadFileTree(path) {
+  _fileCurrentDir = path || '';
   const d = await get(`/api/files?path=${path||''}`);
   if (!d.ok) { $('fileBrowser').innerHTML = `<div class="loading">${d.error}</div>`; return }
   const items = d.items || [];
   const html = ['<div class="file-browser"><div class="file-tree">'];
-  if (d.current) html.push(`<div class="fi folder" onclick="loadFileTree('')">.. (root)</div>`);
+  if (d.current) {
+    const parent = parentDir(d.current);
+    if (parent !== d.current) {
+      html.push(`<div class="fi folder" onclick="loadFileTree('${parent}')">&#x2191; .. (${parent ? dirName(parent) : 'root'})</div>`);
+    }
+  }
   for (const item of items) {
     const icon = item.is_dir ? '' : '';
     const cls = item.is_dir ? 'folder' : 'file';
     const click = item.is_dir ? `loadFileTree('${item.path}')` : `openFile('${item.path}')`;
-    const del = `<span class="fi-del" onclick="event.stopPropagation();deleteFile('${item.path}',${item.is_dir})" title="Delete">&#x2715;</span>`;
-    html.push(`<div class="fi ${cls}" onclick="${click}">${icon} ${item.name}${del}</div>`);
+    const acts = `<span class="fi-act"><span onclick="event.stopPropagation();copyFile('${item.path}',${item.is_dir})" title="Copy">&#x1F4CB;</span><span class="fi-mv" onclick="event.stopPropagation();moveFile('${item.path}',${item.is_dir})" title="Move">&#x2702;</span><span class="fi-del" onclick="event.stopPropagation();deleteFile('${item.path}',${item.is_dir})" title="Delete">&#x2715;</span></span>`;
+    html.push(`<div class="fi ${cls}" onclick="${click}">${icon} ${item.name}${acts}</div>`);
   }
   html.push('</div><div class="file-editor" id="fileEditor"><div class="fe-header">Select a file to edit</div></div></div>');
   $('fileBrowser').innerHTML = html.join('');
@@ -1268,7 +1294,7 @@ async function openFile(path) {
     <textarea id="fileContent" spellcheck="false">${escapeHtml(d.content)}</textarea>
     <div class="fe-actions">
       <button class="btn btn-save" onclick="saveFile()">Save</button>
-      <button class="btn btn-secondary" onclick="loadFileTree()">Cancel</button>
+      <button class="btn btn-secondary" onclick="loadFileTree(_fileCurrentDir)">Cancel</button>
     </div>
   `;
 }
@@ -1286,8 +1312,26 @@ async function deleteFile(path, isDir) {
   const d = await api('file/delete', {path});
   if (d.ok) {
     toast(`Deleted`, 'success');
-    loadFileTree(_fileUploadDest);
+    loadFileTree(_fileCurrentDir);
   }
+}
+
+async function copyFile(path, isDir) {
+  const label = isDir ? 'folder' : 'file';
+  const dest = prompt(`Copy "${path}" to (relative path):`, path);
+  if (!dest) return;
+  if (dest === path) { toast('Destination must be different', 'error'); return; }
+  const d = await api('file/copy', {source: path, destination: dest});
+  if (d.ok) { toast(d.message||'Copied!', 'success'); loadFileTree(_fileCurrentDir); }
+}
+
+async function moveFile(path, isDir) {
+  const label = isDir ? 'folder' : 'file';
+  const dest = prompt(`Move "${path}" to (relative path):`, path);
+  if (!dest) return;
+  if (dest === path) { toast('Destination must be different', 'error'); return; }
+  const d = await api('file/move', {source: path, destination: dest});
+  if (d.ok) { toast(d.message||'Moved!', 'success'); loadFileTree(_fileCurrentDir); }
 }
 
 let _fileUploadDest = '';

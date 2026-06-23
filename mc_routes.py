@@ -269,6 +269,58 @@ def register_routes(app, html):
         except Exception as e:
             return fail(str(e))
 
+    @app.route("/api/servers/<sid>/file/copy", methods=["POST"])
+    def api_file_copy(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        data = parse_json_body()
+        src = data.get("source", "")
+        dst = data.get("destination", "")
+        if not src or not dst:
+            return fail("Source and destination required.")
+        src_path = safe_resolve(inst.dir, src)
+        dst_path = safe_resolve(inst.dir, dst)
+        if src_path is None or dst_path is None:
+            return fail("Access denied.")
+        if not src_path.exists():
+            return fail("Source not found.")
+        if dst_path.exists():
+            return fail("Destination already exists.")
+        try:
+            import shutil
+            if src_path.is_dir():
+                shutil.copytree(str(src_path), str(dst_path))
+            else:
+                shutil.copy2(str(src_path), str(dst_path))
+            return ok({"message": f"Copied to {dst}"})
+        except Exception as e:
+            return fail(str(e))
+
+    @app.route("/api/servers/<sid>/file/move", methods=["POST"])
+    def api_file_move(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        data = parse_json_body()
+        src = data.get("source", "")
+        dst = data.get("destination", "")
+        if not src or not dst:
+            return fail("Source and destination required.")
+        src_path = safe_resolve(inst.dir, src)
+        dst_path = safe_resolve(inst.dir, dst)
+        if src_path is None or dst_path is None:
+            return fail("Access denied.")
+        if not src_path.exists():
+            return fail("Source not found.")
+        if dst_path.exists():
+            return fail("Destination already exists.")
+        try:
+            src_path.rename(dst_path)
+            return ok({"message": f"Moved to {dst}"})
+        except Exception as e:
+            return fail(str(e))
+
     @app.route("/api/servers/<sid>/file/delete", methods=["POST"])
     def api_file_delete(sid):
         inst = _resolve(sid)
