@@ -97,38 +97,35 @@ def start_tunnel(timeout=30):
             subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         return True, {"message": "Already claimed. Tunnel should be running."}
 
-    lines_out = []
-    claim_url = None
+    all_raw = []
 
-    # Try 1: run the main 'playit' binary (combined client+daemon)
-    if _PLAYIT:
-        ok, out, lines = _capture_output([_PLAYIT], timeout=timeout)
-        lines_out.append(f"[playit] {len(lines)} lines")
-        claim_url = _find_claim_url(lines)
-        if claim_url:
-            return True, {"claim": claim_url, "lines": lines_out + lines}
-
-    # Try 2: run playitd (daemon) in foreground briefly to capture output
-    if _PLAYITD:
-        ok, out, lines = _capture_output([_PLAYITD], timeout=10)
-        lines_out.append(f"[playitd] {len(lines)} lines")
-        claim_url = _find_claim_url(lines)
-        if claim_url:
-            return True, {"claim": claim_url, "lines": lines_out + lines}
-
-    # Try 3: run playit-cli (client)
+    # Try 1: run playit-cli FIRST (client generates the claim URL)
     if _PLAYIT_CLI:
         ok, out, lines = _capture_output([_PLAYIT_CLI], timeout=timeout)
-        lines_out.append(f"[playit-cli] {len(lines)} lines")
+        all_raw.append(("playit-cli", out, lines))
         claim_url = _find_claim_url(lines)
         if claim_url:
-            return True, {"claim": claim_url, "lines": lines_out + lines}
+            return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    # If none worked, start daemon in background and return whatever output
-    if _PLAYITD:
-        subprocess.Popen([_PLAYITD], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    # Try 2: run the main 'playit' binary (combined)
+    if _PLAYIT:
+        ok, out, lines = _capture_output([_PLAYIT], timeout=10)
+        all_raw.append(("playit", out, lines))
+        claim_url = _find_claim_url(lines)
+        if claim_url:
+            return True, {"claim": claim_url, "lines": lines, "raw": all_raw}
 
-    return True, {"lines": lines_out, "message": "Could not extract claim URL. Check playit.gg website for manual setup."}
+    # No claim URL found — return everything we captured
+    formatted = []
+    for name, out, lines in all_raw:
+        formatted.append(f">>> {name} ({len(lines)} lines)")
+        for l in lines[-15:]:
+            formatted.append(f"  {l}")
+    return True, {
+        "lines": formatted,
+        "raw": "\n".join(f">>> {n}\n{o}" for n, o, _ in all_raw),
+        "message": "Could not find claim URL. Try the manual setup below.",
+    }
 
 
 def check_tunnel_status():

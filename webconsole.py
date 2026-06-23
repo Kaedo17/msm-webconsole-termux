@@ -1233,7 +1233,7 @@ async function loadTunnel() {
 async function claimPlayit() {
   const outDiv = $('playitOutput');
   if (!outDiv) return;
-  outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap';
+  outDiv.style.cssText = 'font-size:13px;color:#888;margin-top:12px;white-space:pre-wrap;background:#0a0a0a;padding:12px;border-radius:6px';
   outDiv.textContent = 'Getting claim URL...';
   try {
     const ac = new AbortController();
@@ -1242,17 +1242,21 @@ async function claimPlayit() {
     clearTimeout(timeout);
     const d = await r.json();
     if (!d.ok) { outDiv.textContent = d.error || 'Failed.'; return; }
+    let html = '';
     if (d.claim) {
-      outDiv.innerHTML = `
+      html = `
         <p style="color:#5ced73;margin-bottom:8px">Claim URL generated!</p>
         <a href="${d.claim}" target="_blank" style="color:#64b5f6;font-size:16px;word-break:break-all">${d.claim}</a>
         <p style="color:#888;margin-top:8px">Open the link in your browser and follow the instructions to claim your tunnel.</p>
-        <p style="color:#888">After claiming, click <b>Start Daemon</b> below to run the tunnel.</p>`;
-    } else if (d.lines && d.lines.length) {
-      outDiv.textContent = (d.lines || []).join('\n') + '\n\n' + (d.message || '');
+        <p style="color:#888">After claiming, come back here and click <b>Start Daemon</b>.</p>`;
     } else {
-      outDiv.textContent = d.message || 'Check the page for status.';
+      html = `<p style="color:#f90;margin-bottom:8px">${d.message || 'Could not find claim URL automatically.'}</p>
+        <p style="margin-top:8px"><a href="https://playit.gg/claim" target="_blank" class="btn btn-cmd" style="text-decoration:none">&#x2197; Open playit.gg to claim manually</a></p>`;
     }
+    if (d.lines && d.lines.length) {
+      html += '<div style="font-size:12px;color:#666;margin-top:8px">Output:</div><pre style="font-size:11px;color:#555;margin:4px 0;white-space:pre-wrap">' + escapeHtml(d.lines.join('\n')) + '</pre>';
+    }
+    outDiv.innerHTML = html;
   } catch(e) {
     outDiv.textContent = 'Request timed out. Try again.';
   }
