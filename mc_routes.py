@@ -81,6 +81,15 @@ def register_routes(app, html):
             if not ok_:
                 return ok({"message": f"Server created but download failed: {msg}",
                            "server": inst.to_dict(), "download_error": True})
+        modpack_url = data.get("modpack_file_url", "")
+        modpack_name = data.get("modpack_filename", "")
+        if modpack_url and modpack_name:
+            mods_dir = inst.dir / "mods"
+            mods_dir.mkdir(exist_ok=True)
+            try:
+                modrinth_download(modpack_url, mods_dir / modpack_name)
+            except Exception:
+                pass
         return ok({"message": f"Server '{name}' created.", "server": inst.to_dict()})
 
     @app.route("/api/versions")
@@ -637,3 +646,41 @@ def register_routes(app, html):
         if "already claimed" in out.lower() or "agent" in out.lower():
             result["claimed"] = True
         return ok(result)
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  GLOBAL MODPACK SEARCH (no server ID required)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @app.route("/api/modpacks/search")
+    def api_modpacks_search():
+        q = request.args.get("q", "")
+        pt = request.args.get("type", "modpack")
+        prov = request.args.get("provider", "modrinth")
+        if not q:
+            return fail("Search query required.")
+        if prov == "modrinth":
+            results = modrinth_search(q, pt)
+        elif prov == "curseforge":
+            results = cf_search(q, pt)
+        else:
+            return fail(f"Unknown provider: {prov}")
+        if isinstance(results, dict) and "error" in results:
+            return fail(results["error"])
+        return ok({"results": results, "provider": prov, "type": pt})
+
+    @app.route("/api/modpacks/versions")
+    def api_modpacks_versions():
+        pid = request.args.get("id", "")
+        pt = request.args.get("type", "modpack")
+        prov = request.args.get("provider", "modrinth")
+        if not pid:
+            return fail("Project ID required.")
+        if prov == "modrinth":
+            versions = modrinth_versions(pid)
+        elif prov == "curseforge":
+            versions = cf_versions(pid, pt)
+        else:
+            versions = modrinth_versions(pid)
+        if isinstance(versions, dict) and "error" in versions:
+            return fail(versions["error"])
+        return ok({"versions": versions})
