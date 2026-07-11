@@ -844,7 +844,7 @@ async function deleteServer(sid, name) {
   loadDashboard();
   setInterval(async () => {
     if (document.getElementById('dashTunnel')) {
-      const td = await get('/api/playit/status');
+      const td = await get('/api/playit/info');
       updateTunnelDashboard(td);
     }
   }, 10000);
@@ -863,6 +863,7 @@ async function loadDashboard() {
       <div class="stat-card"><div class="sc-label">Players</div><div class="sc-val" id="dashPlayers" style="color:#b388ff">${d.online_count} / ${d.max_players}</div></div>
       <div class="stat-card"><div class="sc-label">Memory</div><div class="sc-val" id="dashMem" style="color:#5ced73">${d.mem_mb||'—'} MB</div></div>
       <div class="stat-card"><div class="sc-label">Uptime</div><div class="sc-val" id="dashUptime" style="color:#64b5f6;font-size:18px">—</div></div>
+      <div class="stat-card"><div class="sc-label">Address</div><div class="sc-val" id="dashAddr" style="font-size:14px;color:#64b5f6">${d.local_ip||'—'}:${d.server_port||'25565'}</div></div>
       <div class="stat-card"><div class="sc-label">Tunnel</div><div class="sc-val" id="dashTunnel" style="font-size:14px;color:#888">—</div></div>
     </div>
     <div class="server-actions">
@@ -1555,9 +1556,15 @@ async function installPlayit() {
 function updateTunnelDashboard(d) {
   const tw = document.getElementById('dashTunnel');
   if (!tw) return;
-  if (d.installed && d.running) tw.innerHTML = '<span style="color:#5ced73">&#x25cf; Tunnel Online</span>';
-  else if (d.installed && d.daemon_running) tw.innerHTML = '<span style="color:#f90">&#x25cf; Daemon Running</span>';
-  else tw.innerHTML = '<span style="color:#888">&#x25cf; Tunnel Offline</span>';
+  if (d.installed && d.running && d.tunnels && d.tunnels.length) {
+    tw.innerHTML = '<span style="color:#5ced73;font-size:12px">' + escapeHtml(d.tunnels[0]) + '</span>';
+  } else if (d.installed && d.running) {
+    tw.innerHTML = '<span style="color:#5ced73">&#x25cf; Online</span>';
+  } else if (d.installed && d.daemon_running) {
+    tw.innerHTML = '<span style="color:#f90">&#x25cf; Daemon Running</span>';
+  } else {
+    tw.innerHTML = '<span style="color:#888">&#x25cf; Offline</span>';
+  }
 }
 
 function copyText(text) {

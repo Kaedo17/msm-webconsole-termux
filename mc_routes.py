@@ -3,6 +3,7 @@
 import json
 import queue
 import re
+import socket
 import subprocess
 import tarfile
 import time
@@ -10,6 +11,17 @@ from datetime import datetime
 
 from flask import request, Response  # type: ignore
 from werkzeug.utils import secure_filename  # type: ignore
+
+def _get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 
 import mc_instances as mci
 import mc_state
@@ -119,6 +131,7 @@ def register_routes(app, html):
         s = inst.status_dict()
         s["max_players"] = int(props.get("max-players", 20))
         s["server_port"] = int(props.get("server-port", inst.port))
+        s["local_ip"] = _get_local_ip()
         return ok(s)
 
     @app.route("/api/servers/<sid>/ram", methods=["GET", "POST"])
