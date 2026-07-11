@@ -50,6 +50,12 @@ def get_minecraft_versions():
         return []
 
 
+def get_latest_minecraft_version():
+    """Get the latest stable Minecraft release version."""
+    versions = get_minecraft_versions()
+    return versions[0] if versions else ""
+
+
 def get_forge_versions(mc_version):
     """Fetch available Forge versions for a Minecraft version."""
     try:
@@ -101,15 +107,21 @@ def get_download_url(server_type, mc_version, forge_version=None):
 
     elif st == "fabric":
         loader_url = "https://meta.fabricmc.net/v2/versions/loader"
+        loader_ver = "0.16.10"
+        installer_ver = "1.0.1"
         try:
             loaders = _get_json(f"{loader_url}/{mc_version}")
             if loaders:
                 loader_ver = loaders[0]["loader"]["version"]
-                installer_ver = loaders[0]["launcherMeta"].get("version", "1.0.1")
-                return f"{loader_url}/{mc_version}/{loader_ver}/{installer_ver}/server/jar"
         except Exception:
             pass
-        return f"{loader_url}/{mc_version}/0.16.10/1.0.1/server/jar"
+        try:
+            installers = _get_json("https://meta.fabricmc.net/v2/versions/installer")
+            if installers:
+                installer_ver = installers[0]["version"]
+        except Exception:
+            pass
+        return f"{loader_url}/{mc_version}/{loader_ver}/{installer_ver}/server/jar"
 
     elif st == "forge":
         if not forge_version:

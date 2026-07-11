@@ -41,7 +41,15 @@ PROPS_SCHEMA = {
 def save_props(server_dir, changes):
     pf = server_dir / "server.properties"
     if not pf.exists():
-        return False, "server.properties not found"
+        lines = ["#Minecraft server properties\n"]
+        for k, s in PROPS_SCHEMA.items():
+            default = changes.get(k) or s.get("default", "")
+            lines.append(f"{k}={default}\n")
+        for k, v in changes.items():
+            if k not in PROPS_SCHEMA:
+                lines.append(f"{k}={v}\n")
+        pf.write_text("".join(lines), encoding="utf-8")
+        return True, "Properties saved"
     lines = pf.read_text(encoding="utf-8").splitlines(keepends=True)
     changed = set(changes.keys())
     for i, line in enumerate(lines):

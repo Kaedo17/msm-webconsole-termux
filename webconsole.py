@@ -369,8 +369,8 @@ HTML = r"""<!DOCTYPE html>
       </select>
     </div>
     <div style="display:flex;gap:12px;margin-top:10px">
-      <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="text" id="csMinRam" value="512M" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
-      <div style="flex:1"><label style="font-size:13px;color:#888">Max RAM</label><input type="text" id="csMaxRam" value="2G" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none"></div>
+      <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="range" id="csMinRam" min="512" max="8192" step="256" value="512" style="width:100%;accent-color:#5ced73" oninput="document.getElementById('csMinRamVal').textContent=fmtRamMb(parseInt(this.value))"><span id="csMinRamVal" style="font-size:14px;color:#5ced73;font-weight:bold;display:block;text-align:center;margin-top:2px">512 MB</span></div>
+      <div style="flex:1"><label style="font-size:13px;color:#888">Max RAM</label><input type="range" id="csMaxRam" min="512" max="8192" step="256" value="2048" style="width:100%;accent-color:#5ced73" oninput="document.getElementById('csMaxRamVal').textContent=fmtRamMb(parseInt(this.value))"><span id="csMaxRamVal" style="font-size:14px;color:#5ced73;font-weight:bold;display:block;text-align:center;margin-top:2px">2 GB</span></div>
     </div>
     <div style="display:flex;align-items:center;margin-top:10px">
       <input type="checkbox" id="csEula" style="margin-right:6px;width:auto">
@@ -636,6 +636,18 @@ async function pollStatus() {
   } catch(e) {}
 }
 
+function parseRamMb(v) {
+  let n = parseInt(v);
+  return v.toUpperCase().endsWith('G') ? n * 1024 : n;
+}
+function fmtRamMb(mb) {
+  return mb >= 1024 ? (mb / 1024) + ' GB' : mb + ' MB';
+}
+function valToRam(v) {
+  let n = parseInt(v);
+  return n >= 1024 ? (n / 1024) + 'G' : n + 'M';
+}
+
 // ── Server Management ──
 
 async function loadServers() {
@@ -769,8 +781,8 @@ async function doCreateServer() {
   const jt = $('csType').value;
   const mcVer = $('csVersion').value;
   const forgeVer = $('csForgeVersion')?.value || '';
-  const minRam = $('csMinRam').value.trim().toUpperCase();
-  const maxRam = $('csMaxRam').value.trim().toUpperCase();
+  const minRam = valToRam($('csMinRam').value);
+  const maxRam = valToRam($('csMaxRam').value);
   if ($('csEula') && !$('csEula').checked) { toast('You must accept the EULA', 'error'); return; }
   closeModal('createServerModal');
   const body = {name, jar_type: jt, min_ram: minRam, max_ram: maxRam};
@@ -868,25 +880,27 @@ async function loadDashboard() {
     </div>
     <div style="margin-top:16px;padding:16px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px">
       <h3 style="margin-bottom:8px;font-size:14px;color:#888;text-transform:uppercase">RAM Allocation</h3>
-      <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
-        <div>
+      <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
           <label style="font-size:12px;color:#888">Min RAM</label>
-          <input type="text" id="ramMin" value="${d.min_ram}" style="width:90px;padding:8px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:14px;outline:none;margin-top:4px">
+          <input type="range" id="ramMin" min="512" max="8192" step="256" value="${parseRamMb(d.min_ram)}" style="width:100%;accent-color:#5ced73" oninput="document.getElementById('ramMinVal').textContent=fmtRamMb(parseInt(this.value))">
+          <span id="ramMinVal" style="font-size:14px;color:#5ced73;font-weight:bold;display:block;text-align:center">${fmtRamMb(parseRamMb(d.min_ram))}</span>
         </div>
-        <div>
+        <div style="flex:1;min-width:120px">
           <label style="font-size:12px;color:#888">Max RAM</label>
-          <input type="text" id="ramMax" value="${d.max_ram}" style="width:90px;padding:8px 10px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:14px;outline:none;margin-top:4px">
+          <input type="range" id="ramMax" min="512" max="8192" step="256" value="${parseRamMb(d.max_ram)}" style="width:100%;accent-color:#5ced73" oninput="document.getElementById('ramMaxVal').textContent=fmtRamMb(parseInt(this.value))">
+          <span id="ramMaxVal" style="font-size:14px;color:#5ced73;font-weight:bold;display:block;text-align:center">${fmtRamMb(parseRamMb(d.max_ram))}</span>
         </div>
-        <button class="btn btn-save" style="padding:8px 18px" onclick="saveRam()" id="ramSaveBtn">Save RAM</button>
+        <button class="btn btn-save" style="padding:8px 18px;height:36px" onclick="saveRam()" id="ramSaveBtn">Save RAM</button>
       </div>
-      <div style="font-size:12px;color:#666;margin-top:8px">Examples: 512M, 1G, 2G, 4G — stop server before changing</div>
+      <div style="font-size:12px;color:#666;margin-top:8px">Stop server before changing</div>
     </div>
   `;
 }
 
 async function saveRam() {
-  const min = $('ramMin').value.trim().toUpperCase();
-  const max = $('ramMax').value.trim().toUpperCase();
+  const min = valToRam($('ramMin').value);
+  const max = valToRam($('ramMax').value);
   const btn = $('ramSaveBtn');
   btn.textContent = 'Saving...';
   btn.disabled = true;
@@ -914,7 +928,7 @@ async function loadProperties() {
     for (const p of cats[c]) {
       html += `<div class="prop-row" data-key="${p.key}"><div class="pr-label">${escapeHtml(p.label)}<small>${escapeHtml(p.desc)}</small></div>`;
       const val = p.value;
-      if (p.type === 'bool') {
+      if (p.type === 'bool' || val === 'true' || val === 'false') {
         const checked = val === 'true' ? 'checked' : '';
         html += `<label class="toggle"><input type="checkbox" ${checked} onchange="propChanged('${p.key}',this.checked?'true':'false')"><span class="slider"></span></label>`;
       } else if (p.type === 'enum') {

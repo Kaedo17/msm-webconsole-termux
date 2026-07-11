@@ -140,6 +140,21 @@ def _gen_id(name):
     return sid
 
 
+_DEFAULT_PROPS = """#Minecraft server properties
+server-port={port}
+online-mode=false
+difficulty=normal
+gamemode=survival
+max-players=20
+view-distance=10
+spawn-protection=16
+pvp=true
+level-name=world
+enable-command-block=false
+motd=A Minecraft Server
+"""
+
+
 def create_server(name, jar_type="vanilla", min_ram="512M", max_ram="2G",
                   port=None, mc_version=None):
     sid = _gen_id(name)
@@ -149,6 +164,9 @@ def create_server(name, jar_type="vanilla", min_ram="512M", max_ram="2G",
         port = _next_available_port()
     inst = ServerInstance(sid, name, server_dir, jar_type, min_ram, max_ram, port)
     inst.save_config()
+    props = server_dir / "server.properties"
+    if not props.exists():
+        props.write_text(_DEFAULT_PROPS.format(port=port))
     with _registry_lock:
         _servers[sid] = inst
     _save_registry()

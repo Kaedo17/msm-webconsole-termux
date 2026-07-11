@@ -62,13 +62,13 @@ def register_routes(app, html):
                 save_props(inst.dir, {"level-seed": seed})
             else:
                 props_path.write_text(f"level-seed={seed}\n")
-        mc_ver = data.get("mc_version", "")
+        mc_ver = data.get("mc_version", "") or mc_downloads.get_latest_minecraft_version()
         if mc_ver:
             forge_ver = data.get("forge_version", "")
             ok_, msg = mc_downloads.download_server_jar(inst.dir, jt, mc_ver, forge_ver)
             if not ok_:
                 return ok({"message": f"Server created but download failed: {msg}",
-                           "server": inst.to_dict()})
+                           "server": inst.to_dict(), "download_error": True})
         return ok({"message": f"Server '{name}' created.", "server": inst.to_dict()})
 
     @app.route("/api/versions")

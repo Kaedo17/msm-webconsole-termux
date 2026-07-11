@@ -100,6 +100,24 @@ def _check_eula(inst):
     return "eula=true" in eula.read_text().strip()
 
 
+def _ensure_properties(inst):
+    props = inst.dir / "server.properties"
+    if not props.exists():
+        props.write_text(
+            f"server-port={inst.port}\n"
+            "online-mode=false\n"
+            "difficulty=normal\n"
+            "gamemode=survival\n"
+            "max-players=20\n"
+            "view-distance=10\n"
+            "spawn-protection=16\n"
+            "pvp=true\n"
+            "level-name=world\n"
+            "enable-command-block=false\n"
+            "motd=A Minecraft Server\n"
+        )
+
+
 def _make_java_cmd(inst, jar):
     return [
         str(mc_state.JAVA_BIN),
@@ -117,6 +135,7 @@ def start_server(inst):
         return False, "No server jar found."
     if not _check_eula(inst):
         return False, "EULA not accepted. Edit eula.txt and set eula=true."
+    _ensure_properties(inst)
 
     env = _load_env()
     java_cmd = _make_java_cmd(inst, jar)
