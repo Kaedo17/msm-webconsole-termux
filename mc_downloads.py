@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -126,12 +127,47 @@ def get_download_url(server_type, mc_version, forge_version=None):
     elif st == "forge":
         if not forge_version:
             return ""
-        url = (f"https://maven.minecraftforge.net/net/minecraftforge/forge/"
-               f"{mc_version}-{forge_version}/forge-{mc_version}-{forge_version}-installer.jar")
-        return url
+        return (f"https://maven.minecraftforge.net/net/minecraftforge/forge/"
+                f"{mc_version}-{forge_version}/forge-{mc_version}-{forge_version}-installer.jar")
 
     else:
         return _resolve_mcjars(st, mc_version)
+
+
+def _try_forge_direct(server_dir, mc_version, forge_version):
+    """Try to download the Forge server jar directly from maven, bypassing the installer."""
+    base = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{mc_version}-{forge_version}/forge-{mc_version}-{forge_version}"
+    patterns = [
+        f"{base}-server.jar",
+        f"{base}.jar",
+        f"{base}-universal.jar",
+    ]
+    for url in patterns:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            resp = urllib.request.urlopen(req, timeout=60)
+            data = resp.read()
+            if len(data) >= 1000:
+                jar_path = server_dir / "server.jar"
+                jar_path.write_bytes(data)
+                return True, ""
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                return False, f"Direct download failed (HTTP {e.code})"
+        except Exception:
+            pass
+    return False, "No direct server jar available"
+
+
+def _find_server_jar(server_dir):
+    """Find a valid server jar, searching root then subdirectories."""
+    for f in sorted(server_dir.glob("*.jar")):
+        if "installer" not in f.name.lower():
+            return f
+    for f in sorted(server_dir.rglob("*.jar")):
+        if "installer" not in f.name.lower():
+            return f
+    return None
 
 
 def download_server_jar(server_dir, server_type, mc_version, forge_version=None):
@@ -153,23 +189,48 @@ def download_server_jar(server_dir, server_type, mc_version, forge_version=None)
         jar_path.unlink()
         return False, "Downloaded file appears invalid (too small)."
 
-    # For Forge, run the installer
+    # For Forge, try direct download first, then fall back to installer
     if server_type.lower() == "forge":
+        ok_, _ = _try_forge_direct(server_dir, mc_version, forge_version)
+        if ok_:
+            return True, f"Downloaded server.jar (via direct maven)"
+        import mc_state
+        installer_size = jar_path.stat().st_size
+        jars_before = set(server_dir.rglob("*.jar"))
         try:
-            subprocess.run(
-                [str(subprocess.check_output(["which", "java"], text=True).strip()),
-                 "-jar", str(jar_path), "--installServer"],
-                cwd=str(server_dir), capture_output=True, timeout=120
+            result = subprocess.run(
+                [str(mc_state.JAVA_BIN), "-jar", str(jar_path), "--installServer"],
+                cwd=str(server_dir), capture_output=True, text=True, timeout=300
             )
-            # Clean up installer files
             for f in server_dir.glob("installer.log"):
                 f.unlink()
-            # Find the actual forge jar
-            forge_jars = list(server_dir.glob("forge-*.jar"))
-            for f in forge_jars:
-                if "installer" not in f.name and "universal" not in f.name:
+            if result.returncode != 0:
+                return False, f"Forge installer failed: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}"
+            jars_after = set(server_dir.rglob("*.jar"))
+            new_jars = jars_after - jars_before
+            found = False
+            for f in new_jars:
+                if "installer" not in f.name.lower():
                     f.rename(server_dir / "server.jar")
+                    found = True
                     break
+            if not found:
+                for f in sorted(server_dir.glob("forge-*.jar")):
+                    if "installer" not in f.name.lower():
+                        f.rename(server_dir / "server.jar")
+                        found = True
+                        break
+            if not found:
+                if jar_path.exists() and abs(jar_path.stat().st_size - installer_size) > 1000:
+                    found = True
+            if not found:
+                j = _find_server_jar(server_dir)
+                if j and j != jar_path and "installer" not in j.name.lower():
+                    import shutil
+                    shutil.copy2(str(j), str(jar_path))
+                    found = True
+            if not found:
+                return False, "Forge installer ran but no server jar found."
         except subprocess.TimeoutExpired:
             return False, "Forge installer timed out."
         except Exception as e:
