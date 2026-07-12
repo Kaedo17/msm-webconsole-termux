@@ -707,13 +707,29 @@ def register_routes(app, html):
         if not inst:
             return fail("Server not found.", 404)
         data = parse_json_body()
-        target = safe_resolve(inst.dir, data.get("path", ""))
-        if target is None:
-            return fail("Access denied.")
-        if not target.exists():
-            return fail("File not found.")
-        target.unlink()
-        return ok({"message": f"Removed {target.name}"})
+        paths = data.get("paths", data.get("path", None))
+        if paths is None:
+            return fail("No path provided.")
+        if isinstance(paths, str):
+            paths = [paths]
+        if not paths:
+            return fail("No paths provided.")
+        removed = []
+        errors = []
+        for p in paths:
+            target = safe_resolve(inst.dir, p)
+            if target is None:
+                errors.append(f"Access denied: {p}")
+            elif not target.exists():
+                errors.append(f"Not found: {p}")
+            else:
+                target.unlink()
+                removed.append(target.name)
+        if removed and errors:
+            return ok({"message": f"Removed {len(removed)}, {len(errors)} errors", "removed": removed, "errors": errors})
+        if removed:
+            return ok({"message": f"Removed {len(removed)} file(s)", "removed": removed})
+        return fail(errors[0] if errors else "No files removed.")
 
 
 

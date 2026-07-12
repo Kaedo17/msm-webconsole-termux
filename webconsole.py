@@ -375,7 +375,7 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <div id="packResults"></div>
       </div>
-      <div id="packInstalled" style="display:none">
+            <div id="packInstalled" style="display:none">
         <div class="server-actions">
           <button class="btn btn-cmd" onclick="openUploadModal('mod')">Import Mod</button>
           <button class="btn btn-cmd" onclick="openUploadModal('modpack')">Import Modpack</button>
@@ -385,10 +385,14 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-cmd" onclick="openUploadModal('plugin')">Import Plugin</button>
           <button class="btn btn-cmd" onclick="openUploadModal('server')">Import Server Jar</button>
         </div>
+        <div id="packSelectBar" style="display:none;margin-bottom:10px;padding:10px 14px;background:#1a2a1a;border:1px solid #3a5a3a;border-radius:6px;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectAllPacks()" id="packSelectAllBtn">Select All</button>
+          <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="deleteSelectedPacks()" id="packDeleteSelectedBtn" disabled>Delete Selected (0)</button>
+          <span id="packSelectedCount" style="font-size:13px;color:#888"></span>
+          <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px;margin-left:auto" onclick="clearPackSelection()">Clear</button>
+        </div>
         <div id="packInstalledList"></div>
-      </div>
-    </div>
-    <div class="page" id="page-backups">
+      </div><div class="page" id="page-backups">
       <div class="server-actions">
         <button class="btn btn-backup" onclick="createBackup()">Create Backup</button>
       </div>
@@ -1360,25 +1364,106 @@ async function installPack(fileUrl, filename, packType) {
   }
 }
 
+let _packSelected = new Set();
+
 async function loadInstalledPacks() {
   const d = await get('/api/packs/installed');
   const container = $('packInstalledList');
+  _packSelected = new Set();
+  $('packSelectBar').style.display = 'none';
+  
   if (!d.ok || !d.packs || !d.packs.length) {
     container.innerHTML = '<div class="search-status">Nothing installed yet</div>';
     return;
   }
-  let html = '<div class="installed-list">';
+  
+  let html = '<div style="display:flex;gap:8px;margin-bottom:10px">';
+  html += '<button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectMode()" id="packSelectModeBtn">&#x2713; Select Multiple</button>';
+  html += '</div>';
+  html += '<div class="installed-list">';
   for (const p of d.packs) {
     const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' MB' : (p.size/1024).toFixed(0)+' KB';
-    const typeLabels = {'mod':'Mod','resourcepack':'Resource Pack','datapack':'Data Pack','shader':'Shader','plugin':'Plugin','modpack':'Modpack','server':'Server'};
+    const typeLabels = {'mod':'<span style="color:#5ced73">Mod</span>','plugin':'<span style="color:#b388ff">Plugin</span>','resourcepack':'<span style="color:#64b5f6">Resource Pack</span>','datapack':'<span style="color:#4db6ac">Data Pack</span>','shader':'<span style="color:#ffd54f">Shader</span>','modpack':'<span style="color:#f48fb1">Modpack</span>','server':'<span style="color:#888">Server</span>'};
     const label = typeLabels[p.type] || 'Mod';
-    html += `<div class="installed-item">
-      <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
-      <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>
+    const checked = _packSelected.has(p.path) ? 'checked' : '';
+    html += `<div class="installed-item" style="position:relative">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <input type="checkbox" class="pack-cb" data-path="${escapeHtml(p.path)}" ${checked} onchange="onPackCheck(this)" style="display:none;width:16px;height:16px;accent-color:#5ced73;flex-shrink:0">
+        <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
+      </div>
+      <button class="btn btn-danger pack-remove-btn" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>
     </div>`;
   }
   html += '</div>';
   container.innerHTML = html;
+}
+
+let _selectMode = false;
+
+function toggleSelectMode() {
+  _selectMode = !_selectMode;
+  _packSelected = new Set();
+  const bar = $('packSelectBar');
+  const btn = $('packSelectModeBtn');
+  if (_selectMode) {
+    btn.textContent = '✕ Cancel Selection';
+    bar.style.display = 'flex';
+    document.querySelectorAll('.pack-cb').forEach(cb => cb.style.display = 'inline-block');
+    document.querySelectorAll('.pack-remove-btn').forEach(b => b.style.display = 'none');
+  } else {
+    btn.textContent = '✓ Select Multiple';
+    bar.style.display = 'none';
+    document.querySelectorAll('.pack-cb').forEach(cb => cb.style.display = 'none');
+    document.querySelectorAll('.pack-remove-btn').forEach(b => b.style.display = '');
+  }
+  updatePackSelectUI();
+}
+
+function onPackCheck(cb) {
+  if (cb.checked) _packSelected.add(cb.dataset.path);
+  else _packSelected.delete(cb.dataset.path);
+  updatePackSelectUI();
+}
+
+function toggleSelectAllPacks() {
+  const all = document.querySelectorAll('.pack-cb');
+  const someUnchecked = Array.from(all).some(cb => !cb.checked);
+  all.forEach(cb => {
+    cb.checked = someUnchecked;
+    if (someUnchecked) _packSelected.add(cb.dataset.path);
+    else _packSelected.delete(cb.dataset.path);
+  });
+  updatePackSelectUI();
+  $('packSelectAllBtn').textContent = someUnchecked ? 'Deselect All' : 'Select All';
+}
+
+function updatePackSelectUI() {
+  const count = _packSelected.size;
+  $('packSelectedCount').textContent = count + ' selected';
+  const btn = $('packDeleteSelectedBtn');
+  btn.disabled = count === 0;
+  btn.textContent = 'Delete Selected (' + count + ')';
+}
+
+function clearPackSelection() {
+  _packSelected = new Set();
+  document.querySelectorAll('.pack-cb').forEach(cb => cb.checked = false);
+  updatePackSelectUI();
+  $('packSelectAllBtn').textContent = 'Select All';
+}
+
+async function deleteSelectedPacks() {
+  if (_packSelected.size === 0) return;
+  if (!confirm('Delete ' + _packSelected.size + ' selected file(s)?')) return;
+  const paths = Array.from(_packSelected);
+  const r = await fetch('/api/servers/' + _currentServer + '/packs/remove', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({paths})
+  });
+  const d = await r.json();
+  if (d.ok) { toast(d.message || 'Deleted', 'success'); loadInstalledPacks(); }
+  else { toast(d.error || 'Delete failed', 'error'); }
 }
 
 function initPackDropzone() {
