@@ -609,6 +609,11 @@ launch_web_ui() {
         err "Python 3 not found. Install: pkg install python"
         return 1
     fi
+    # Auto-install Flask if missing
+    if ! python3 -c "import flask" 2>/dev/null; then
+        info "Installing Flask..."
+        python3 -m pip install flask || { err "Failed to install Flask."; return 1; }
+    fi
     # If --dir was given, import it into ~/mc-servers/ first
     if [ "$SERVER_DIR" != "$SCRIPT_DIR" ]; then
         info "Importing server from $SERVER_DIR ..."

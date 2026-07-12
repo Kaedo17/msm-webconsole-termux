@@ -554,11 +554,13 @@ function closeSidebar() {
 // ── Navigation ──
 document.querySelectorAll('.sidebar nav a').forEach(a => {
   a.onclick = e => {
-    e.preventDefault();
-    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
-    a.classList.add('active');
-    showPage(a.dataset.page);
-    closeSidebar();
+    try {
+      e.preventDefault();
+      document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+      showPage(a.dataset.page);
+      closeSidebar();
+    } catch(err) { console.error('nav error:', err); toast('Page error: ' + err.message, 'error'); }
   };
 });
 
