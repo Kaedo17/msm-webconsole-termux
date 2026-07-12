@@ -1291,7 +1291,7 @@ async function installPack(fileUrl, filename, packType) {
     cp('ipDetail').textContent = '';
 
     try {
-      const r = await fetch(`/api/packs/install`, {
+      const r = await fetch(`/api/servers/${_currentServer}/packs/install`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({file_url: fileUrl, filename, type: packType})
