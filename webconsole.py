@@ -895,8 +895,14 @@ function showCreateServerModal() {
 }
 
 function onCsTypeChange() {
-  $('forgeVersionRow').style.display = ($('csType').value === 'forge') ? 'block' : 'none';
-  if ($('csType').value === 'forge') loadForgeVersions();
+  const type = $('csType').value;
+  $('forgeVersionRow').style.display = (type === 'forge' || type === 'neoforge') ? 'block' : 'none';
+  if (type === 'forge' || type === 'neoforge') loadForgeVersions();
+}
+
+function onCsVersionChange() {
+  const type = $('csType').value;
+  if (type === 'forge' || type === 'neoforge') loadForgeVersions();
 }
 
 async function loadForgeVersions() {
