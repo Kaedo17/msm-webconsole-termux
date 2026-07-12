@@ -502,6 +502,24 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
+<div class="modal" id="installProgressModal">
+  <div class="modal-box" style="min-width:420px">
+    <h3 id="ipTitle">Installing...</h3>
+    <div style="margin:16px 0">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#888;margin-bottom:4px">
+        <span id="ipPhase">Starting...</span>
+        <span id="ipCount"></span>
+      </div>
+      <div style="width:100%;height:20px;background:#111;border-radius:10px;overflow:hidden">
+        <div id="ipBar" style="width:0%;height:100%;background:linear-gradient(90deg,#2e7d32,#5ced73);border-radius:10px;transition:width .3s"></div>
+      </div>
+      <div id="ipDetail" style="margin-top:8px;font-size:12px;color:#666;word-break:break-all"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('installProgressModal')" id="ipCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1260,6 +1278,71 @@ async function showVersions(projectId, title, packType, provider) {
 
 async function installPack(fileUrl, filename, packType) {
   closeModal('versionModal');
+
+  // Show progress modal for modpacks
+  if (packType === 'modpack') {
+    const cp = (id) => document.getElementById(id);
+    cp('installProgressModal').classList.add('show');
+    cp('ipCloseBtn').disabled = true;
+    cp('ipTitle').textContent = 'Installing modpack...';
+    cp('ipPhase').textContent = 'Downloading modpack...';
+    cp('ipCount').textContent = '';
+    cp('ipBar').style.width = '5%';
+    cp('ipDetail').textContent = '';
+
+    try {
+      const r = await fetch(`/api/packs/install`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({file_url: fileUrl, filename, type: packType})
+      });
+      const d = await r.json();
+      if (!d.ok) { toast(d.error || 'Install failed', 'error'); closeModal('installProgressModal'); return; }
+
+      const taskId = d.task_id;
+      if (!taskId) { toast('Installed', 'success'); closeModal('installProgressModal'); loadInstalledPacks(); return; }
+
+      // Poll progress
+      const poll = setInterval(async () => {
+        try {
+          const pr = await fetch('/api/packs/install/status/' + taskId).then(r => r.json());
+          if (!pr.ok || !pr.progress) { clearInterval(poll); return; }
+          const p = pr.progress;
+
+          if (p.phase === 'extracting') {
+            cp('ipPhase').textContent = 'Extracting modpack files...';
+            const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+            cp('ipBar').style.width = Math.min(pct, 100) + '%';
+            cp('ipCount').textContent = p.current + '/' + p.total;
+            cp('ipDetail').textContent = p.message || '';
+          } else if (p.phase === 'downloading') {
+            cp('ipPhase').textContent = 'Downloading mods...';
+            const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+            cp('ipBar').style.width = Math.min(pct, 100) + '%';
+            cp('ipCount').textContent = p.current + '/' + p.total;
+            cp('ipDetail').textContent = p.message || '';
+          } else if (p.phase === 'done' || p.status === 'done') {
+            clearInterval(poll);
+            cp('ipBar').style.width = '100%';
+            cp('ipPhase').textContent = 'Complete!';
+            cp('ipCount').textContent = '';
+            cp('ipDetail').textContent = p.message || '';
+            cp('ipCloseBtn').disabled = false;
+            toast(p.message || 'Modpack installed!', 'success');
+            loadInstalledPacks();
+          } else if (p.status === 'error') {
+            clearInterval(poll);
+            cp('ipDetail').textContent = p.message || 'Install failed';
+            cp('ipCloseBtn').disabled = false;
+            toast(p.message || 'Install failed', 'error');
+          }
+        } catch(e) { clearInterval(poll); }
+      }, 500);
+    } catch(e) { toast('Install request failed', 'error'); closeModal('installProgressModal'); }
+    return;
+  }
+
+  // Non-modpack: simple install
   toast('Installing...', 'info');
   const d = await api('packs/install', {file_url: fileUrl, filename, type: packType});
   if (d.ok) {

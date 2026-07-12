@@ -551,121 +551,140 @@ def register_routes(app, html):
             downloaded = modrinth_download(file_url, dest)
 
             if pack_type == "modpack" and dest.suffix == ".zip":
-                import zipfile
+                import threading as _thr
                 import json
+                import zipfile
                 import urllib.request
                 import shutil
+                from mc_helpers import create_progress, update_progress
 
-                try:
-                    extracted = []
-                    mods_downloaded = 0
-                    mods_failed = 0
-                    mods_dir = inst.dir / "mods"
-                    mods_dir.mkdir(exist_ok=True)
+                tid = create_progress()
 
-                    with zipfile.ZipFile(str(dest), "r") as zf:
-                        for entry in zf.infolist():
-                            if entry.filename.endswith("/"):
-                                continue
-                            if entry.filename.startswith("overrides/"):
-                                rel = entry.filename[10:]
-                                if rel:
-                                    target = inst.dir / rel
-                                    target.parent.mkdir(parents=True, exist_ok=True)
-                                    zf.extract(entry, str(inst.dir))
-                                    tmp = inst.dir / "overrides" / rel
-                                    if tmp.exists() and tmp != target:
+                def _run():
+                    try:
+                        extracted = []
+                        mods_downloaded = 0
+                        mods_failed = 0
+                        mods_dir = inst.dir / "mods"
+                        mods_dir.mkdir(exist_ok=True)
+                        update_progress(tid, status="running", phase="extracting", message="Extracting overrides...")
+
+                        with zipfile.ZipFile(str(dest), "r") as zf:
+                            entries = [e for e in zf.infolist() if not e.filename.endswith("/")]
+                            total_entries = len(entries)
+                            for idx, entry in enumerate(entries):
+                                update_progress(tid, current=idx+1, total=total_entries,
+                                                phase="extracting", message=f"Extracting {entry.filename}")
+                                if entry.filename.startswith("overrides/"):
+                                    rel = entry.filename[10:]
+                                    if rel:
+                                        target = inst.dir / rel
                                         target.parent.mkdir(parents=True, exist_ok=True)
-                                        target.write_bytes(tmp.read_bytes())
-                                        tmp.unlink()
-                                    extracted.append(rel)
-                            elif entry.filename.startswith("server-overrides/"):
-                                rel = entry.filename[17:]
-                                if rel:
-                                    target = inst.dir / rel
-                                    target.parent.mkdir(parents=True, exist_ok=True)
-                                    zf.extract(entry, str(inst.dir))
-                                    tmp = inst.dir / "server-overrides" / rel
-                                    if tmp.exists() and tmp != target:
+                                        zf.extract(entry, str(inst.dir))
+                                        tmp = inst.dir / "overrides" / rel
+                                        if tmp.exists() and tmp != target:
+                                            target.parent.mkdir(parents=True, exist_ok=True)
+                                            target.write_bytes(tmp.read_bytes())
+                                            tmp.unlink()
+                                        extracted.append(rel)
+                                elif entry.filename.startswith("server-overrides/"):
+                                    rel = entry.filename[17:]
+                                    if rel:
+                                        target = inst.dir / rel
                                         target.parent.mkdir(parents=True, exist_ok=True)
-                                        target.write_bytes(tmp.read_bytes())
-                                        tmp.unlink()
-                                    extracted.append(rel)
-                            elif entry.filename.startswith("mods/"):
-                                rel = entry.filename[5:]
-                                if rel:
-                                    target = mods_dir / rel
-                                    target.parent.mkdir(parents=True, exist_ok=True)
-                                    zf.extract(entry, str(mods_dir.parent))
-                                    extracted.append(rel)
+                                        zf.extract(entry, str(inst.dir))
+                                        tmp = inst.dir / "server-overrides" / rel
+                                        if tmp.exists() and tmp != target:
+                                            target.parent.mkdir(parents=True, exist_ok=True)
+                                            target.write_bytes(tmp.read_bytes())
+                                            tmp.unlink()
+                                        extracted.append(rel)
+                                elif entry.filename.startswith("mods/"):
+                                    rel = entry.filename[5:]
+                                    if rel:
+                                        target = mods_dir / rel
+                                        target.parent.mkdir(parents=True, exist_ok=True)
+                                        zf.extract(entry, str(mods_dir.parent))
+                                        extracted.append(rel)
 
-                        for fld in ["overrides", "server-overrides", "client-overrides"]:
-                            shutil.rmtree(str(inst.dir / fld), ignore_errors=True)
+                            for fld in ["overrides", "server-overrides", "client-overrides"]:
+                                shutil.rmtree(str(inst.dir / fld), ignore_errors=True)
 
-                        if "manifest.json" in zf.namelist():
-                            manifest = json.loads(zf.read("manifest.json"))
-                            mod_files = manifest.get("files", [])
-                            cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                     "AppleWebKit/537.36")
-                            cf_api = "https://api.curse.tools/v1/cf"
-                            if mod_files:
-                                import concurrent.futures
-                                import threading
+                            # Download mods from manifest
+                            if "manifest.json" in zf.namelist():
+                                manifest = json.loads(zf.read("manifest.json"))
+                                mod_files = manifest.get("files", [])
+                                total_mods = len(mod_files)
+                                update_progress(tid, phase="downloading", message=f"Downloading 0/{total_mods} mods...")
 
-                                _dl_lock = threading.Lock()
+                                if mod_files:
+                                    import concurrent.futures
+                                    _dl_lock = _thr.Lock()
+                                    cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                             "AppleWebKit/537.36")
+                                    cf_api = "https://api.curse.tools/v1/cf"
 
-                                def _download_one(mf):
-                                    pid = mf.get("projectID")
-                                    fid = mf.get("fileID")
-                                    if not pid or not fid:
-                                        return False, None
-                                    try:
-                                        url = f"{cf_api}/mods/{pid}/files/{fid}"
-                                        req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
-                                        resp = urllib.request.urlopen(req, timeout=15)
-                                        fdata = json.loads(resp.read()).get("data", {})
-                                        dl_url = fdata.get("downloadUrl", "")
-                                        fname = fdata.get("fileName", f"{pid}-{fid}.jar")
-                                        if dl_url and ".jar" in fname.lower():
-                                            dl_req = urllib.request.Request(dl_url, headers={"User-Agent": cf_ua})
-                                            dl_resp = urllib.request.urlopen(dl_req, timeout=45)
-                                            jar_path = mods_dir / fname
-                                            jar_path.parent.mkdir(parents=True, exist_ok=True)
-                                            with open(jar_path, "wb") as jf:
-                                                while True:
-                                                    chunk = dl_resp.read(65536)
-                                                    if not chunk:
-                                                        break
-                                                    jf.write(chunk)
-                                            return True, fname
-                                        return False, fname
-                                    except Exception:
-                                        return False, fname
+                                    def _dl_one(mf):
+                                        pid = mf.get("projectID")
+                                        fid = mf.get("fileID")
+                                        if not pid or not fid:
+                                            return False, None
+                                        try:
+                                            url = f"{cf_api}/mods/{pid}/files/{fid}"
+                                            req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
+                                            resp = urllib.request.urlopen(req, timeout=15)
+                                            fd = json.loads(resp.read()).get("data", {})
+                                            du = fd.get("downloadUrl", "")
+                                            fn = fd.get("fileName", f"{pid}-{fid}.jar")
+                                            if du and ".jar" in fn.lower():
+                                                dq = urllib.request.Request(du, headers={"User-Agent": cf_ua})
+                                                dr = urllib.request.urlopen(dq, timeout=45)
+                                                jp = mods_dir / fn
+                                                jp.parent.mkdir(parents=True, exist_ok=True)
+                                                with open(jp, "wb") as jf:
+                                                    while True:
+                                                        c = dr.read(65536)
+                                                        if not c:
+                                                            break
+                                                        jf.write(c)
+                                                return True, fn
+                                            return False, fn
+                                        except Exception:
+                                            return False, fn
 
-                                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-                                    futures = [pool.submit(_download_one, mf) for mf in mod_files]
-                                    for f in concurrent.futures.as_completed(futures):
-                                        ok, name = f.result()
-                                        with _dl_lock:
-                                            if ok:
-                                                mods_downloaded += 1
-                                            else:
-                                                mods_failed += 1
+                                    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                                        futs = [pool.submit(_dl_one, mf) for mf in mod_files]
+                                        done_count = 0
+                                        for f in concurrent.futures.as_completed(futs):
+                                            ok_mod, name = f.result()
+                                            with _dl_lock:
+                                                if ok_mod:
+                                                    mods_downloaded += 1
+                                                else:
+                                                    mods_failed += 1
+                                                done_count = mods_downloaded + mods_failed
+                                                update_progress(tid, current=done_count,
+                                                                total=total_mods, phase="downloading",
+                                                                message=f"Downloading mods ({done_count}/{total_mods})")
 
-                    modpacks_ref = inst.dir / "modpacks" / filename
-                    modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
-                    if dest.exists():
-                        dest.rename(modpacks_ref)
+                        modpacks_ref = inst.dir / "modpacks" / filename
+                        modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
+                        if dest.exists():
+                            dest.rename(modpacks_ref)
 
-                    msg = f"Installed modpack ({len(extracted)} overrides, {mods_downloaded} mods"
-                    if mods_failed:
-                        msg += f", {mods_failed} failed"
-                    msg += ")"
-                    return ok({"message": msg, "extracted": len(extracted), "mods": mods_downloaded, "failed": mods_failed})
-                except zipfile.BadZipFile:
-                    pass
-                except Exception as e:
-                    return fail(f"Modpack extraction failed: {e}")
+                        msg = f"Installed modpack ({len(extracted)} overrides, {mods_downloaded} mods"
+                        if mods_failed:
+                            msg += f", {mods_failed} failed"
+                        msg += ")"
+                        update_progress(tid, status="done", phase="done", message=msg,
+                                        done=True, current=total_entries, total=total_entries)
+
+                    except Exception as e:
+                        update_progress(tid, status="error", phase="error",
+                                        message=f"Failed: {e}", error=str(e), done=True)
+
+                _thr.Thread(target=_run, daemon=True).start()
+                return ok({"task_id": tid, "message": "Modpack install started"})
 
             return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(inst.dir)).replace("\\", "/")})
         except Exception as e:
@@ -694,6 +713,16 @@ def register_routes(app, html):
             return fail("File not found.")
         target.unlink()
         return ok({"message": f"Removed {target.name}"})
+
+
+
+    @app.route("/api/packs/install/status/<task_id>")
+    def api_packs_install_status(task_id):
+        from mc_helpers import get_progress
+        p = get_progress(task_id)
+        if p is None:
+            return fail("Task not found.", 404)
+        return ok({"progress": p})
 
     # ═══════════════════════════════════════════════════════════════════
     #  PLAYIT.GG TUNNEL
