@@ -463,7 +463,7 @@ HTML = r"""<!DOCTYPE html>
     <select id="csType" onchange="onCsTypeChange()" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     </select>
     <label style="font-size:13px;color:#888;display:block;margin-top:10px">Minecraft Version</label>
-    <select id="csVersion" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+    <select id="csVersion" onchange="onCsVersionChange()" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
       <option value="">Loading...</option>
     </select>
     <div id="forgeVersionRow" style="display:none">
