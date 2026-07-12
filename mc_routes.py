@@ -81,15 +81,6 @@ def register_routes(app, html):
             if not ok_:
                 return ok({"message": f"Server created but download failed: {msg}",
                            "server": inst.to_dict(), "download_error": True})
-        modpack_url = data.get("modpack_file_url", "")
-        modpack_name = data.get("modpack_filename", "")
-        if modpack_url and modpack_name:
-            mods_dir = inst.dir / "mods"
-            mods_dir.mkdir(exist_ok=True)
-            try:
-                modrinth_download(modpack_url, mods_dir / modpack_name)
-            except Exception:
-                pass
         return ok({"message": f"Server '{name}' created.", "server": inst.to_dict()})
 
     @app.route("/api/versions")
@@ -557,7 +548,74 @@ def register_routes(app, html):
         dest_dir = inst.dir / dest_subdir
         dest = dest_dir / filename
         try:
-            modrinth_download(file_url, dest)
+            downloaded = modrinth_download(file_url, dest)
+
+            # If it's a modpack zip, extract mods/ and overrides/
+            if pack_type == "modpack" and dest.suffix == ".zip":
+                import zipfile
+                try:
+                    with zipfile.ZipFile(str(dest), "r") as zf:
+                        mods_dir = inst.dir / "mods"
+                        mods_dir.mkdir(exist_ok=True)
+                        extracted = []
+                        for entry in zf.infolist():
+                            if entry.filename.endswith("/"):
+                                continue
+                            # Extract mods/ entries into the mods folder
+                            if entry.filename.startswith("mods/"):
+                                rel = entry.filename[5:]
+                                if rel:
+                                    target = mods_dir / rel
+                                    target.parent.mkdir(parents=True, exist_ok=True)
+                                    zf.extract(entry, str(mods_dir.parent))
+                                    extracted.append(rel)
+                            # Extract overrides/ entries into the server root
+                            elif entry.filename.startswith("overrides/"):
+                                rel = entry.filename[10:]
+                                if rel:
+                                    target = inst.dir / rel
+                                    target.parent.mkdir(parents=True, exist_ok=True)
+                                    zf.extract(entry, str(inst.dir))
+                                    # Move from overrides_tmp/ to correct location
+                                    tmp = inst.dir / "overrides" / rel
+                                    if tmp.exists() and tmp != target:
+                                        target.parent.mkdir(parents=True, exist_ok=True)
+                                        target.write_bytes(tmp.read_bytes())
+                                        tmp.unlink()
+                                    extracted.append(rel)
+                            # Extract server-overrides/ entries (Modrinth format)
+                            elif entry.filename.startswith("server-overrides/"):
+                                rel = entry.filename[17:]
+                                if rel:
+                                    target = inst.dir / rel
+                                    target.parent.mkdir(parents=True, exist_ok=True)
+                                    zf.extract(entry, str(inst.dir))
+                                    tmp = inst.dir / "server-overrides" / rel
+                                    if tmp.exists() and tmp != target:
+                                        target.parent.mkdir(parents=True, exist_ok=True)
+                                        target.write_bytes(tmp.read_bytes())
+                                        tmp.unlink()
+                                    extracted.append(rel)
+
+                        # Clean up temp extraction folders
+                        import shutil
+                        for fld in ["overrides", "server-overrides", "mods", "client-overrides"]:
+                            shutil.rmtree(str(inst.dir / fld), ignore_errors=True)
+
+                        # Keep the zip as a reference in modpacks/
+                        modpacks_ref = inst.dir / "modpacks" / filename
+                        modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
+                        dest.rename(modpacks_ref)
+
+                        msg = f"Installed modpack ({len(extracted)} files)"
+                        if extracted:
+                            msg += f" — e.g. {extracted[0]}"
+                        return ok({"message": msg, "extracted": len(extracted)})
+                except zipfile.BadZipFile:
+                    pass
+                except Exception as e:
+                    return fail(f"Modpack extraction failed: {e}")
+
             return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(inst.dir))})
         except Exception as e:
             err = str(e)
@@ -646,41 +704,3 @@ def register_routes(app, html):
         if "already claimed" in out.lower() or "agent" in out.lower():
             result["claimed"] = True
         return ok(result)
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  GLOBAL MODPACK SEARCH (no server ID required)
-    # ═══════════════════════════════════════════════════════════════════
-
-    @app.route("/api/modpacks/search")
-    def api_modpacks_search():
-        q = request.args.get("q", "")
-        pt = request.args.get("type", "modpack")
-        prov = request.args.get("provider", "modrinth")
-        if not q:
-            return fail("Search query required.")
-        if prov == "modrinth":
-            results = modrinth_search(q, pt)
-        elif prov == "curseforge":
-            results = cf_search(q, pt)
-        else:
-            return fail(f"Unknown provider: {prov}")
-        if isinstance(results, dict) and "error" in results:
-            return fail(results["error"])
-        return ok({"results": results, "provider": prov, "type": pt})
-
-    @app.route("/api/modpacks/versions")
-    def api_modpacks_versions():
-        pid = request.args.get("id", "")
-        pt = request.args.get("type", "modpack")
-        prov = request.args.get("provider", "modrinth")
-        if not pid:
-            return fail("Project ID required.")
-        if prov == "modrinth":
-            versions = modrinth_versions(pid)
-        elif prov == "curseforge":
-            versions = cf_versions(pid, pt)
-        else:
-            versions = modrinth_versions(pid)
-        if isinstance(versions, dict) and "error" in versions:
-            return fail(versions["error"])
-        return ok({"versions": versions})

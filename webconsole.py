@@ -480,38 +480,11 @@ HTML = r"""<!DOCTYPE html>
       <input type="checkbox" id="csEula" style="margin-right:6px;width:auto">
       <label style="font-size:13px;color:#888">I accept the <a href="https://minecraft.net/eula" target="_blank" style="color:#5ced73">Minecraft EULA</a></label>
     </div>
-    <div style="margin-top:10px">
-      <label style="font-size:13px;color:#888;display:block">Modpack <span style="color:#666">(optional)</span></label>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
-        <span id="csModpackSelected" style="color:#5ced73;font-size:13px;display:none"></span>
-        <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="openModpackPicker('modrinth')">Browse Modrinth</button>
-        <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="openModpackPicker('curseforge')">Browse CurseForge</button>
-        <span id="csModpackRemove" style="color:#ff4444;cursor:pointer;display:none;font-size:18px" onclick="clearModpack()">&times;</span>
-      </div>
-    </div>
     <label style="font-size:13px;color:#888;display:block;margin-top:10px">World Seed <span style="color:#666">(optional)</span></label>
     <input type="text" id="csSeed" placeholder="Leave blank for random" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn btn-secondary" onclick="closeModal('createServerModal')">Cancel</button>
       <button class="btn btn-start" id="csCreateBtn" onclick="doCreateServer()">Create & Download</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="modpackPickerModal">
-  <div class="modal-box" style="min-width:550px;max-height:85vh;overflow-y:auto">
-    <h3>Select Modpack</h3>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn btn-cmd" id="mpProviderMr" onclick="mpSetProvider('modrinth')">Modrinth</button>
-      <button class="btn btn-secondary" id="mpProviderCf" onclick="mpSetProvider('curseforge')">CurseForge</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <input type="text" id="mpSearch" placeholder="Search modpacks..." style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none" onkeydown="if(event.key==='Enter')mpSearch()">
-      <button class="btn btn-cmd" onclick="mpSearch()">Search</button>
-    </div>
-    <div id="mpResults" style="margin-top:10px"></div>
-    <div class="modal-actions" style="margin-top:14px">
-      <button class="btn btn-secondary" onclick="closeModal('modpackPickerModal')">Cancel</button>
     </div>
   </div>
 </div>
@@ -943,12 +916,7 @@ async function doCreateServer() {
   body.eula = true;
   const seed = $('csSeed')?.value.trim();
   if (seed) body.level_seed = seed;
-  if (_mpFileUrl && _mpFilename) {
-    body.modpack_file_url = _mpFileUrl;
-    body.modpack_filename = _mpFilename;
-  }
   const d = await api('servers', body);
-  _mpFileUrl = _mpFilename = '';
   loadServers();
   if (d && d.ok && d.server) {
     if (d.download_error) {
@@ -956,115 +924,6 @@ async function doCreateServer() {
     }
     selectServer(d.server.id);
   }
-}
-
-let _mpProvider = 'modrinth';
-let _mpFileUrl = '';
-let _mpFilename = '';
-let _mpProjectId = '';
-
-function mpSetProvider(prov) {
-  _mpProvider = prov;
-  $('mpProviderMr').className = prov === 'modrinth' ? 'btn btn-cmd' : 'btn btn-secondary';
-  $('mpProviderCf').className = prov === 'curseforge' ? 'btn btn-cmd' : 'btn btn-secondary';
-}
-
-function openModpackPicker(prov) {
-  if (prov) mpSetProvider(prov);
-  $('mpSearch').value = '';
-  $('mpResults').innerHTML = '';
-  $('modpackPickerModal').classList.add('show');
-  setTimeout(() => $('mpSearch').focus(), 200);
-}
-
-function clearModpack() {
-  _mpFileUrl = '';
-  _mpFilename = '';
-  _mpProjectId = '';
-  $('csModpackSelected').style.display = 'none';
-  $('csModpackRemove').style.display = 'none';
-}
-
-async function mpSearch() {
-  let q = $('mpSearch').value.trim();
-  if (!q) { q = 'popular'; }
-  const container = $('mpResults');
-  container.innerHTML = '<div class="search-status">Searching...</div>';
-  const d = await fetch(`/api/modpacks/search?q=${encodeURIComponent(q)}&type=modpack&provider=${_mpProvider}`).then(r => r.json());
-  if (!d.ok || !d.results) { container.innerHTML = `<div class="search-status">${d.error||'No results'}</div>`; return; }
-  if (!d.results.length) { container.innerHTML = '<div class="search-status">No modpacks found</div>'; return; }
-  let html = '<div class="pack-grid">';
-  for (const r of d.results) {
-    const icon = r.icon_url || '';
-    const dl = r.downloads >= 1000 ? Math.floor(r.downloads/1000)+'k' : r.downloads;
-    const provLabel = r.provider === 'curseforge' ? '<span style="color:#f90">CurseForge</span>' : '<span style="color:#5ced73">Modrinth</span>';
-    html += `<div class="pack-card">
-      <img src="${icon}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 48 48%22><rect fill=%22%23333%22 width=%2248%22 height=%2248%22/><text x=%2224%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2224%22>?</text></svg>'">
-      <div class="pc-body">
-        <h4>${escapeHtml(r.title)}</h4>
-        <p>${escapeHtml(r.description)}</p>
-        <div class="pc-meta">
-          <span>${escapeHtml(r.author)}</span>
-          <span>${dl} downloads</span>
-          <span>${provLabel}</span>
-        </div>
-        <button class="btn btn-cmd" style="padding:4px 12px;font-size:12px;margin-top:6px" onclick="mpShowVersions('${r.id}','${escapeHtml(r.title)}')">Select Version</button>
-      </div>
-    </div>`;
-  }
-  html += '</div>';
-  container.innerHTML = html;
-}
-
-async function mpShowVersions(projectId, title) {
-  _mpProjectId = projectId;
-  const container = $('mpResults');
-  container.innerHTML = `<div class="search-status">Loading versions for ${escapeHtml(title)}...</div>`;
-  const d = await fetch(`/api/modpacks/versions?id=${projectId}&type=modpack&provider=${_mpProvider}`).then(r => r.json());
-  if (!d.ok || !d.versions) { container.innerHTML = `<div class="search-status">${d.error||'Failed to load'}</div>`; return; }
-  if (!d.versions.length) { container.innerHTML = '<div class="search-status">No versions found</div>'; return; }
-  let html = `<div style="margin-bottom:8px"><button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="mpSearch()">&#x2190; Back to results</button> <strong style="color:#5ced73">${escapeHtml(title)}</strong></div>`;
-  html += '<div style="max-height:300px;overflow-y:auto">';
-  for (const v of d.versions) {
-    const gameVer = (v.game_versions||[]).slice(0,3).join(', ') + ((v.game_versions||[]).length > 3 ? '...' : '');
-    const loaders = (v.loaders||[]).join(', ');
-    for (const f of (v.files||[]).slice(0,1)) {
-      const size = f.size >= 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
-      html += `<div style="padding:10px;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;background:#151515">
-        <div style="font-size:13px"><strong>${escapeHtml(v.name)}</strong> <span style="color:#888">${v.version_number}</span></div>
-        <div style="font-size:12px;color:#666;margin:4px 0">${gameVer} | ${loaders} | ${size}</div>
-        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="mpSelect('${f.url}','${f.filename}','${escapeHtml(title)}','${v.game_versions?.[0]||''}','${v.loaders?.[0]||''}')">Select</button>
-      </div>`;
-    }
-  }
-  html += '</div>';
-  container.innerHTML = html;
-}
-
-function mpSelect(fileUrl, filename, title, gameVer, loader) {
-  _mpFileUrl = fileUrl;
-  _mpFilename = filename;
-  closeModal('modpackPickerModal');
-  const sel = $('csModpackSelected');
-  sel.textContent = 'Modpack: ' + title + ' (' + filename + ')';
-  sel.style.display = 'inline';
-  if (gameVer) {
-    const verSel = $('csVersion');
-    for (const opt of verSel.options) {
-      if (opt.value === gameVer) { verSel.value = gameVer; break; }
-    }
-  }
-  if (loader) {
-    const typeMap = {'fabric':'fabric','forge':'forge','quilt':'vanilla','neoforge':'forge'};
-    const typeSel = $('csType');
-    const mapped = typeMap[loader.toLowerCase()] || 'vanilla';
-    for (const opt of typeSel.options) {
-      if (opt.value === mapped) { typeSel.value = mapped; break; }
-    }
-    onCsTypeChange();
-  }
-  $('csModpackRemove').style.display = 'inline';
-  toast('Modpack selected', 'success');
 }
 
 function showImportModal() { $('importModal').classList.add('show'); }
@@ -1896,6 +1755,7 @@ def main():
     ap.add_argument("--port", type=int, help=f"Web port (default: {mc_state.PORT})")
     ap.add_argument("--host", help=f"Bind address (default: {mc_state.HOST})")
     ap.add_argument("--headless", action="store_true", help="Import dir then exit (no web server)")
+    ap.add_argument("--no-browser", action="store_true", help="Don't auto-open browser (EXE only)")
     args = ap.parse_args()
     if args.port:
         mc_state.PORT = args.port
@@ -1927,11 +1787,26 @@ def main():
         print(" Or import an existing server folder there.")
         print()
 
+    port = mc_state.PORT
+    host = mc_state.HOST
     print(f" Minecraft Web Manager")
-    print(f"  Web URL:          http://localhost:{mc_state.PORT}")
+    print(f"  Web URL:          http://localhost:{port}")
     print()
 
-    app.run(host=mc_state.HOST, port=mc_state.PORT, debug=False, use_reloader=False)
+    # Auto-open browser when packaged as EXE (unless --no-browser)
+    if getattr(sys, 'frozen', False) and not args.no_browser:
+        import threading
+        def _open_browser():
+            import time
+            time.sleep(1.5)
+            try:
+                import webbrowser
+                webbrowser.open(f"http://localhost:{port}")
+            except Exception:
+                pass
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    app.run(host=host, port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":
