@@ -84,7 +84,7 @@ def list_installed_packs(server_dir):
                 if f.suffix in (".jar", ".zip"):
                     result.append({
                         "name": f.name,
-                        "path": str(f.relative_to(server_dir)),
+                        "path": str(f.relative_to(server_dir)).replace("\\", "/"),
                         "size": f.stat().st_size,
                         "type": pack_type,
                     })

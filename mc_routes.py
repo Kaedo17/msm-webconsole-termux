@@ -245,16 +245,16 @@ def register_routes(app, html):
             for entry in sorted(target.iterdir()):
                 items.append({
                     "name": entry.name,
-                    "path": str(entry.relative_to(inst.dir)),
+                    "path": str(entry.relative_to(inst.dir)).replace("\\", "/"),
                     "is_dir": entry.is_dir(),
                     "size": entry.stat().st_size if entry.is_file() else 0,
                     "modified": datetime.fromtimestamp(entry.stat().st_mtime).isoformat(),
                 })
-            return ok({"items": items, "current": str(target.relative_to(inst.dir))}), None
+            return ok({"items": items, "current": str(target.relative_to(inst.dir)).replace("\\", "/")}), None
         elif target.is_file():
             try:
                 content = target.read_text(encoding="utf-8", errors="replace")
-                return ok({"content": content, "path": str(target.relative_to(inst.dir)), "name": target.name}), None
+                return ok({"content": content, "path": str(target.relative_to(inst.dir)).replace("\\", "/"), "name": target.name}), None
             except Exception as e:
                 return None, str(e)
         return None, "Path not found."
@@ -378,7 +378,7 @@ def register_routes(app, html):
         dest = dest_dir / filename
         try:
             f.save(str(dest))
-            rel = str(dest.relative_to(inst.dir))
+            rel = str(dest.relative_to(inst.dir)).replace("\\", "/")
             return ok({"message": f"Uploaded {filename}", "path": rel, "name": filename,
                        "size": dest.stat().st_size})
         except Exception as e:
@@ -653,7 +653,7 @@ def register_routes(app, html):
                 except Exception as e:
                     return fail(f"Modpack extraction failed: {e}")
 
-            return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(inst.dir))})
+            return ok({"message": f"Installed {filename}", "path": str(dest.relative_to(inst.dir)).replace("\\", "/")})
         except Exception as e:
             err = str(e)
             if "403" in err or "Forbidden" in err:
