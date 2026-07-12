@@ -629,6 +629,7 @@ def register_routes(app, html):
                                         fid = mf.get("fileID")
                                         if not pid or not fid:
                                             return False, None
+                                        fn = None
                                         try:
                                             url = f"{cf_api}/mods/{pid}/files/{fid}"
                                             req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
@@ -650,7 +651,7 @@ def register_routes(app, html):
                                                 return True, fn
                                             return False, fn
                                         except Exception:
-                                            return False, fn
+                                            return False, fn or "unknown"
 
                                     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                                         futs = [pool.submit(_dl_one, mf) for mf in mod_files]
