@@ -1670,10 +1670,12 @@ let _fileUploadDest = '';
 
 // ── Backups ──
 async function loadBackups() {
-  const d = await get('/api/backups');
   const list = $('backupsList');
-  if (!d.backups || !d.backups.length) {
-    list.innerHTML = '<div style="padding:24px;text-align:center;color:#666">No backups yet.</div>';
+  if (!_currentServer) { list.innerHTML = '<div class="search-status">Select a server to view backups.</div>'; return; }
+  let d;
+  try { d = await get('/api/backups'); } catch(e) { list.innerHTML = '<div class="search-status">Failed to load backups.</div>'; return; }
+  if (!d.ok || !d.backups || !d.backups.length) {
+    list.innerHTML = '<div style="padding:24px;text-align:center;color:#666">' + (d.error || 'No backups yet.') + '</div>';
     return;
   }
   let html = '<div class="backups-list">';
@@ -1702,9 +1704,11 @@ async function restoreBackup(name) {
 let _tunnelPoll = null;
 
 async function loadTunnel() {
-  const d = await get('/api/playit/info');
   const c = $('tunnelContent');
-  if (!d.ok) { c.innerHTML = '<div class="search-status">Error loading tunnel status.</div>'; return; }
+  if (!_currentServer) { c.innerHTML = '<div class="search-status">Select a server to view tunnel.</div>'; return; }
+  let d;
+  try { d = await get('/api/playit/info'); } catch(e) { c.innerHTML = '<div class="search-status">Failed to load tunnel status.</div>'; return; }
+  if (!d.ok) { c.innerHTML = '<div class="search-status">' + (d.error || 'Error loading tunnel status.') + '</div>'; return; }
   if (!d.installed) {
     c.innerHTML = `
       <div class="search-status" style="padding:24px">
