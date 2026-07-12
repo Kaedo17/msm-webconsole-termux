@@ -608,35 +608,49 @@ def register_routes(app, html):
                             cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                      "AppleWebKit/537.36")
                             cf_api = "https://api.curse.tools/v1/cf"
-                            for mf in mod_files:
-                                pid = mf.get("projectID")
-                                fid = mf.get("fileID")
-                                if not pid or not fid:
-                                    continue
-                                try:
-                                    url = f"{cf_api}/mods/{pid}/files/{fid}"
-                                    req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
-                                    resp = urllib.request.urlopen(req, timeout=20)
-                                    file_data = json.loads(resp.read())
-                                    fdata = file_data.get("data", {})
-                                    dl_url = fdata.get("downloadUrl", "")
-                                    fname = fdata.get("fileName", f"{pid}-{fid}.jar")
+                            if mod_files:
+                                import concurrent.futures
+                                import threading
 
-                                    if dl_url and ".jar" in fname.lower():
-                                        dl_req = urllib.request.Request(dl_url, headers={"User-Agent": cf_ua})
-                                        dl_resp = urllib.request.urlopen(dl_req, timeout=60)
-                                        jar_path = mods_dir / fname
-                                        jar_path.parent.mkdir(parents=True, exist_ok=True)
-                                        with open(jar_path, "wb") as jf:
-                                            while True:
-                                                chunk = dl_resp.read(65536)
-                                                if not chunk:
-                                                    break
-                                                jf.write(chunk)
-                                        mods_downloaded += 1
-                                except Exception:
-                                    mods_failed += 1
-                                    continue
+                                _dl_lock = threading.Lock()
+
+                                def _download_one(mf):
+                                    pid = mf.get("projectID")
+                                    fid = mf.get("fileID")
+                                    if not pid or not fid:
+                                        return False, None
+                                    try:
+                                        url = f"{cf_api}/mods/{pid}/files/{fid}"
+                                        req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
+                                        resp = urllib.request.urlopen(req, timeout=15)
+                                        fdata = json.loads(resp.read()).get("data", {})
+                                        dl_url = fdata.get("downloadUrl", "")
+                                        fname = fdata.get("fileName", f"{pid}-{fid}.jar")
+                                        if dl_url and ".jar" in fname.lower():
+                                            dl_req = urllib.request.Request(dl_url, headers={"User-Agent": cf_ua})
+                                            dl_resp = urllib.request.urlopen(dl_req, timeout=45)
+                                            jar_path = mods_dir / fname
+                                            jar_path.parent.mkdir(parents=True, exist_ok=True)
+                                            with open(jar_path, "wb") as jf:
+                                                while True:
+                                                    chunk = dl_resp.read(65536)
+                                                    if not chunk:
+                                                        break
+                                                    jf.write(chunk)
+                                            return True, fname
+                                        return False, fname
+                                    except Exception:
+                                        return False, fname
+
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                                    futures = [pool.submit(_download_one, mf) for mf in mod_files]
+                                    for f in concurrent.futures.as_completed(futures):
+                                        ok, name = f.result()
+                                        with _dl_lock:
+                                            if ok:
+                                                mods_downloaded += 1
+                                            else:
+                                                mods_failed += 1
 
                     modpacks_ref = inst.dir / "modpacks" / filename
                     modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
