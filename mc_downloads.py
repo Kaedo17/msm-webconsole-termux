@@ -66,7 +66,7 @@ def get_forge_versions(mc_version):
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         data = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
         versions = re.findall(rf'<version>{re.escape(mc_version)}-([^<]+)</version>', data)
-        return sorted(set(versions))
+        return sorted(set(versions), reverse=True)
     except Exception:
         return []
 
@@ -92,7 +92,7 @@ def get_neoforge_versions(mc_version):
             return []
 
         matching = [v for v in all_versions if v.startswith(prefix)]
-        return sorted(set(matching))[-50:]  # newest 50
+        return [m for m in sorted(set(matching), reverse=True)][:50]  # newest 50
     except Exception:
         return []
 
