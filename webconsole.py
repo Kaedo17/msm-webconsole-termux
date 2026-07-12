@@ -386,7 +386,8 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-cmd" onclick="openUploadModal('server')">Import Server Jar</button>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:10px">
-          <input type="text" id="packSearchInput" oninput="filterInstalledPacks()" placeholder="Search installed mods..." style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none">
+          <input type="text" id="packSearchInput" oninput="filterInstalledPacks()" placeholder="Search installed..." style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none">
+          <button class="btn btn-secondary" onclick="loadInstalledPacks()" style="padding:4px 12px;font-size:13px">&#x21bb;</button>
         </div>
         <div id="packSelectBar" style="display:none;margin-bottom:10px;padding:10px 14px;background:#1a2a1a;border:1px solid #3a5a3a;border-radius:6px;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectAllPacks()" id="packSelectAllBtn">Select All</button>
