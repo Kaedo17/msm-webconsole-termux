@@ -385,6 +385,9 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-cmd" onclick="openUploadModal('plugin')">Import Plugin</button>
           <button class="btn btn-cmd" onclick="openUploadModal('server')">Import Server Jar</button>
         </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input type="text" id="packSearchInput" oninput="filterInstalledPacks()" placeholder="Search installed mods..." style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none">
+        </div>
         <div id="packSelectBar" style="display:none;margin-bottom:10px;padding:10px 14px;background:#1a2a1a;border:1px solid #3a5a3a;border-radius:6px;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectAllPacks()" id="packSelectAllBtn">Select All</button>
           <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="deleteSelectedPacks()" id="packDeleteSelectedBtn" disabled>Delete Selected (0)</button>
@@ -1368,34 +1371,11 @@ let _packSelected = new Set();
 
 async function loadInstalledPacks() {
   const d = await get('/api/packs/installed');
-  const container = $('packInstalledList');
+  $('packSearchInput').value = '';
   _packSelected = new Set();
   $('packSelectBar').style.display = 'none';
-  
-  if (!d.ok || !d.packs || !d.packs.length) {
-    container.innerHTML = '<div class="search-status">Nothing installed yet</div>';
-    return;
-  }
-  
-  let html = '<div style="display:flex;gap:8px;margin-bottom:10px">';
-  html += '<button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectMode()" id="packSelectModeBtn">&#x2713; Select Multiple</button>';
-  html += '</div>';
-  html += '<div class="installed-list">';
-  for (const p of d.packs) {
-    const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' MB' : (p.size/1024).toFixed(0)+' KB';
-    const typeLabels = {'mod':'<span style="color:#5ced73">Mod</span>','plugin':'<span style="color:#b388ff">Plugin</span>','resourcepack':'<span style="color:#64b5f6">Resource Pack</span>','datapack':'<span style="color:#4db6ac">Data Pack</span>','shader':'<span style="color:#ffd54f">Shader</span>','modpack':'<span style="color:#f48fb1">Modpack</span>','server':'<span style="color:#888">Server</span>'};
-    const label = typeLabels[p.type] || 'Mod';
-    const checked = _packSelected.has(p.path) ? 'checked' : '';
-    html += `<div class="installed-item" style="position:relative">
-      <div style="display:flex;align-items:center;gap:10px;flex:1">
-        <input type="checkbox" class="pack-cb" data-path="${escapeHtml(p.path)}" ${checked} onchange="onPackCheck(this)" style="display:none;width:16px;height:16px;accent-color:#5ced73;flex-shrink:0">
-        <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
-      </div>
-      <button class="btn btn-danger pack-remove-btn" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>
-    </div>`;
-  }
-  html += '</div>';
-  container.innerHTML = html;
+  _allInstalledPacks = (d.ok && d.packs) ? d.packs : [];
+  filterInstalledPacks();
 }
 
 let _selectMode = false;
@@ -1443,6 +1423,40 @@ function updatePackSelectUI() {
   const btn = $('packDeleteSelectedBtn');
   btn.disabled = count === 0;
   btn.textContent = 'Delete Selected (' + count + ')';
+}
+
+let _allInstalledPacks = [];
+
+function filterInstalledPacks() {
+  const q = $('packSearchInput').value.toLowerCase().trim();
+  const container = $('packInstalledList');
+  let html = '<div style="display:flex;gap:8px;margin-bottom:10px">';
+  html += '<button class="btn btn-secondary" style="padding:4px 12px;font-size:12px" onclick="toggleSelectMode()" id="packSelectModeBtn">&#x2713; Select Multiple</button>';
+  html += '</div>';
+  html += '<div class="installed-list">';
+  let count = 0;
+  for (const p of _allInstalledPacks) {
+    if (q && !p.name.toLowerCase().includes(q) && !p.type.toLowerCase().includes(q)) continue;
+    const size = p.size >= 1048576 ? (p.size/1048576).toFixed(1)+' MB' : (p.size/1024).toFixed(0)+' KB';
+    const typeLabels = {'mod':'<span style="color:#5ced73">Mod</span>','plugin':'<span style="color:#b388ff">Plugin</span>','resourcepack':'<span style="color:#64b5f6">Resource Pack</span>','datapack':'<span style="color:#4db6ac">Data Pack</span>','shader':'<span style="color:#ffd54f">Shader</span>','modpack':'<span style="color:#f48fb1">Modpack</span>','server':'<span style="color:#888">Server</span>'};
+    const label = typeLabels[p.type] || 'Mod';
+    const checked = _packSelected.has(p.path) ? 'checked' : '';
+    html += `<div class="installed-item" style="position:relative">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <input type="checkbox" class="pack-cb" data-path="${escapeHtml(p.path)}" ${checked} onchange="onPackCheck(this)" style="display:none;width:16px;height:16px;accent-color:#5ced73;flex-shrink:0">
+        <div class="ii-info"><strong>${escapeHtml(p.name)}</strong><span>${label}</span><span>${size}</span></div>
+      </div>
+      <button class="btn btn-danger pack-remove-btn" style="padding:4px 12px;font-size:12px" onclick="removePack('${p.path}','${escapeHtml(p.name)}')">Remove</button>
+    </div>`;
+    count++;
+  }
+  html += '</div>';
+  if (count === 0) {
+    html = '<div class="search-status">' + (q ? 'No results matching "' + escapeHtml(q) + '"' : 'Nothing installed yet') + '</div>';
+  } else if (q) {
+    html += '<div style="text-align:center;font-size:12px;color:#666;margin-top:8px">' + count + ' matching of ' + _allInstalledPacks.length + ' installed</div>';
+  }
+  container.innerHTML = html;
 }
 
 function clearPackSelection() {
