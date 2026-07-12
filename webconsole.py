@@ -23,8 +23,16 @@ try:
     from flask import Flask
 except ImportError:
     import subprocess
+    import sys as _sys
     print("Installing Flask...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
+    try:
+        _sys.executable = _sys.executable or "python3"
+        subprocess.check_call([_sys.executable, "-m", "pip", "install", "flask"])
+    except Exception as _e:
+        print(f"pip install failed: {_e}")
+        print("Trying pkg install python-pip...")
+        subprocess.check_call(["pkg", "install", "python-pip", "-y"])
+        subprocess.check_call([_sys.executable, "-m", "pip", "install", "flask"])
     from flask import Flask
 
 import mc_state

@@ -37,7 +37,7 @@ echo "[2/5] Installing dependencies..."
 pkg install openjdk-17 screen curl python -y
 
 echo "[3/5] Installing Flask for web UI..."
-pip install flask || python3 -m pip install flask
+pip install flask 2>/dev/null || python3 -m pip install flask 2>/dev/null || (pkg install python-pip -y && pip install flask)
 
 echo "[4/5] Installing mcmanage.sh + webconsole.py + modules..."
 

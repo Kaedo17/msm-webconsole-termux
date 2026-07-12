@@ -612,7 +612,12 @@ launch_web_ui() {
     # Auto-install Flask if missing
     if ! python3 -c "import flask" 2>/dev/null; then
         info "Installing Flask..."
-        python3 -m pip install flask || { err "Failed to install Flask."; return 1; }
+        # Try pip - on Termux, python-pip might not be installed by default
+        python3 -m pip install flask 2>/dev/null || pip install flask 2>/dev/null || {
+            info "pip not found, installing python-pip..."
+            pkg install python-pip -y 2>/dev/null
+            python3 -m pip install flask || { err "Failed to install Flask. Try: pkg install python-pip && pip install flask"; return 1; }
+        }
     fi
     # If --dir was given, import it into ~/mc-servers/ first
     if [ "$SERVER_DIR" != "$SCRIPT_DIR" ]; then
