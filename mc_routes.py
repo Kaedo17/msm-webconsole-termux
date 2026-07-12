@@ -550,40 +550,35 @@ def register_routes(app, html):
         try:
             downloaded = modrinth_download(file_url, dest)
 
-            # If it's a modpack zip, extract mods/ and overrides/
             if pack_type == "modpack" and dest.suffix == ".zip":
                 import zipfile
+                import json
+                import urllib.request
+                import shutil
+
                 try:
+                    extracted = []
+                    mods_downloaded = 0
+                    mods_failed = 0
+                    mods_dir = inst.dir / "mods"
+                    mods_dir.mkdir(exist_ok=True)
+
                     with zipfile.ZipFile(str(dest), "r") as zf:
-                        mods_dir = inst.dir / "mods"
-                        mods_dir.mkdir(exist_ok=True)
-                        extracted = []
                         for entry in zf.infolist():
                             if entry.filename.endswith("/"):
                                 continue
-                            # Extract mods/ entries into the mods folder
-                            if entry.filename.startswith("mods/"):
-                                rel = entry.filename[5:]
-                                if rel:
-                                    target = mods_dir / rel
-                                    target.parent.mkdir(parents=True, exist_ok=True)
-                                    zf.extract(entry, str(mods_dir.parent))
-                                    extracted.append(rel)
-                            # Extract overrides/ entries into the server root
-                            elif entry.filename.startswith("overrides/"):
+                            if entry.filename.startswith("overrides/"):
                                 rel = entry.filename[10:]
                                 if rel:
                                     target = inst.dir / rel
                                     target.parent.mkdir(parents=True, exist_ok=True)
                                     zf.extract(entry, str(inst.dir))
-                                    # Move from overrides_tmp/ to correct location
                                     tmp = inst.dir / "overrides" / rel
                                     if tmp.exists() and tmp != target:
                                         target.parent.mkdir(parents=True, exist_ok=True)
                                         target.write_bytes(tmp.read_bytes())
                                         tmp.unlink()
                                     extracted.append(rel)
-                            # Extract server-overrides/ entries (Modrinth format)
                             elif entry.filename.startswith("server-overrides/"):
                                 rel = entry.filename[17:]
                                 if rel:
@@ -596,21 +591,63 @@ def register_routes(app, html):
                                         target.write_bytes(tmp.read_bytes())
                                         tmp.unlink()
                                     extracted.append(rel)
+                            elif entry.filename.startswith("mods/"):
+                                rel = entry.filename[5:]
+                                if rel:
+                                    target = mods_dir / rel
+                                    target.parent.mkdir(parents=True, exist_ok=True)
+                                    zf.extract(entry, str(mods_dir.parent))
+                                    extracted.append(rel)
 
-                        # Clean up temp extraction folders
-                        import shutil
-                        for fld in ["overrides", "server-overrides", "mods", "client-overrides"]:
+                        for fld in ["overrides", "server-overrides", "client-overrides"]:
                             shutil.rmtree(str(inst.dir / fld), ignore_errors=True)
 
-                        # Keep the zip as a reference in modpacks/
-                        modpacks_ref = inst.dir / "modpacks" / filename
-                        modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
+                        if "manifest.json" in zf.namelist():
+                            manifest = json.loads(zf.read("manifest.json"))
+                            mod_files = manifest.get("files", [])
+                            cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                     "AppleWebKit/537.36")
+                            cf_api = "https://api.curse.tools/v1/cf"
+                            for mf in mod_files:
+                                pid = mf.get("projectID")
+                                fid = mf.get("fileID")
+                                if not pid or not fid:
+                                    continue
+                                try:
+                                    url = f"{cf_api}/mods/{pid}/files/{fid}"
+                                    req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
+                                    resp = urllib.request.urlopen(req, timeout=20)
+                                    file_data = json.loads(resp.read())
+                                    fdata = file_data.get("data", {})
+                                    dl_url = fdata.get("downloadUrl", "")
+                                    fname = fdata.get("fileName", f"{pid}-{fid}.jar")
+
+                                    if dl_url and ".jar" in fname.lower():
+                                        dl_req = urllib.request.Request(dl_url, headers={"User-Agent": cf_ua})
+                                        dl_resp = urllib.request.urlopen(dl_req, timeout=60)
+                                        jar_path = mods_dir / fname
+                                        jar_path.parent.mkdir(parents=True, exist_ok=True)
+                                        with open(jar_path, "wb") as jf:
+                                            while True:
+                                                chunk = dl_resp.read(65536)
+                                                if not chunk:
+                                                    break
+                                                jf.write(chunk)
+                                        mods_downloaded += 1
+                                except Exception:
+                                    mods_failed += 1
+                                    continue
+
+                    modpacks_ref = inst.dir / "modpacks" / filename
+                    modpacks_ref.parent.mkdir(parents=True, exist_ok=True)
+                    if dest.exists():
                         dest.rename(modpacks_ref)
 
-                        msg = f"Installed modpack ({len(extracted)} files)"
-                        if extracted:
-                            msg += f" — e.g. {extracted[0]}"
-                        return ok({"message": msg, "extracted": len(extracted)})
+                    msg = f"Installed modpack ({len(extracted)} overrides, {mods_downloaded} mods"
+                    if mods_failed:
+                        msg += f", {mods_failed} failed"
+                    msg += ")"
+                    return ok({"message": msg, "extracted": len(extracted), "mods": mods_downloaded, "failed": mods_failed})
                 except zipfile.BadZipFile:
                     pass
                 except Exception as e:
