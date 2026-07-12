@@ -57,8 +57,10 @@ def modrinth_versions(project_id):
 
 
 def modrinth_download(file_url, dest_path):
-    req = urllib.request.Request(file_url, headers={"User-Agent": UA})
-    res = urllib.request.urlopen(req, timeout=60)
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+    req = urllib.request.Request(file_url, headers={"User-Agent": ua})
+    res = urllib.request.urlopen(req, timeout=120)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(dest_path, "wb") as f:
         while True:
