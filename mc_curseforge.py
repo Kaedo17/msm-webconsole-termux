@@ -1,10 +1,14 @@
-"""Optimized CurseForge integration — fast, no API key needed.
+"""CurseForge integration via public API proxy (like Prism Launcher).
 
-Key optimizations over the old implementation:
-  1. Search extracts ALL project data from the search page in ONE request
-     (eliminates the N+1 request problem that made it painfully slow)
-  2. Version listing uses improved parsing
-  3. Results cache to avoid re-fetching the same data
+Uses api.curse.tools — a community proxy that mirrors the official
+CurseForge API without requiring an API key. Falls back to optimized
+HTML scraping if the proxy is unavailable.
+
+Official CurseForge API reference:
+  https://docs.curseforge.com/rest-api/
+
+The proxy mirrors the official API at:
+  https://api.curse.tools/v1/cf/
 """
 
 import json
@@ -15,7 +19,20 @@ import urllib.request
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+# API proxy base — mirrors official CurseForge API without API key
+CF_API = "https://api.curse.tools/v1/cf"
 CF_BASE = "https://www.curseforge.com"
+GAME_ID = 432  # Minecraft
+
+CF_CATEGORY_IDS = {
+    "modpack": 4471,
+    "mod": 6,
+    "resourcepack": 12,
+    "datapack": 4545,
+    "shader": 4552,
+    "plugin": 5,
+}
 
 CF_BASE_PATHS = {
     "modpack": "/minecraft/modpacks",
@@ -26,15 +43,10 @@ CF_BASE_PATHS = {
     "plugin": "/bukkit-plugins",
 }
 
-CF_CATEGORIES = {
-    "modpack": "modpacks", "mod": "mc-mods",
-    "resourcepack": "texture-packs", "datapack": "data-packs",
-    "shader": "shaders", "plugin": "bukkit-plugins",
-}
-
-# ── Results cache ────────────────────────────────────────────────────
+# ── Cache ────────────────────────────────────────────────────────────
 _cache = {}
-_CACHE_TTL = 300  # 5 minutes
+_CACHE_TTL = 300
+
 
 def _cached(key, ttl=None):
     entry = _cache.get(key)
@@ -42,12 +54,23 @@ def _cached(key, ttl=None):
         return entry["value"]
     return None
 
+
 def _set_cache(key, value):
     _cache[key] = {"value": value, "time": time.time()}
 
-# ── Helpers ──────────────────────────────────────────────────────────
 
-def _cf_get(url, timeout=20):
+# ── HTTP helpers ─────────────────────────────────────────────────────
+
+def _api_get(path, timeout=15):
+    """Call the proxy API and return parsed JSON."""
+    url = f"{CF_API}{path}"
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    res = urllib.request.urlopen(req, timeout=timeout)
+    return json.loads(res.read())
+
+
+def _cf_get_html(url, timeout=20):
+    """Fetch HTML from CurseForge (for scraping fallback)."""
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -59,13 +82,12 @@ def _cf_get(url, timeout=20):
     return res.read().decode("utf-8", "replace")
 
 
-def _category_path(project_type):
-    return CF_CATEGORIES.get(project_type, "mc-mods")
-
 def _base_path(project_type):
     return CF_BASE_PATHS.get(project_type, "/minecraft/mc-mods")
 
+
 def _parse_download_count(text):
+    """Parse strings like '594.1M', '19.5K' or numbers."""
     text = text.strip().upper()
     try:
         if text.endswith("M"):
@@ -80,158 +102,209 @@ def _parse_download_count(text):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SEARCH
+#  SEARCH — via API proxy
 # ═══════════════════════════════════════════════════════════════════════
 
 def curseforge_search(query, project_type="mod", limit=20):
-    """Search CurseForge — parses ALL results from one HTML page."""
-    cache_key = f"cf_search:{project_type}:{query}:{limit}"
+    """Search CurseForge via API proxy (fast JSON)."""
+    cache_key = f"cf_api_search:{project_type}:{query}:{limit}"
     cached = _cached(cache_key, ttl=60)
     if cached:
         return cached
+
+    data = _api_search(query, project_type, limit)
+    if data is not None:
+        _set_cache(cache_key, data)
+        return data
+
+    # API failed — fall back to scraping
+    return _scrape_search(query, project_type, limit)
+
+
+def _api_search(query, project_type, limit):
+    """Search via API proxy."""
+    try:
+        expected_class = CF_CATEGORY_IDS.get(project_type, 6)
+        path = (f"/mods/search?gameId={GAME_ID}"
+                f"&searchFilter={urllib.parse.quote(query)}"
+                f"&pageSize={limit}"
+                f"&sortOrder=desc")
+        data = _api_get(path)
+        results = []
+        for hit in data.get("data", []):
+            if hit.get("classId") != expected_class:
+                continue
+            results.append({
+                "id": str(hit.get("id", "")),
+                "title": hit.get("name", ""),
+                "slug": hit.get("slug", ""),
+                "description": hit.get("summary", ""),
+                "author": (hit.get("authors") or [{}])[0].get("name", "") if hit.get("authors") else "",
+                "downloads": hit.get("downloadCount", 0),
+                "icon_url": hit.get("logo", {}).get("url", "") if hit.get("logo") else "",
+                "latest_version": "",
+                "project_type": project_type,
+                "provider": "curseforge",
+                "page_url": hit.get("links", {}).get("websiteUrl", ""),
+            })
+        return results
+    except Exception:
+        return None
+
+
+def _scrape_search(query, project_type, limit):
+    """Fallback: find slugs from search page, fetch details via API."""
     try:
         bp = _base_path(project_type)
-        if project_type == "plugin":
-            url = f"{CF_BASE}{bp}?search={urllib.parse.quote(query)}"
-        else:
-            url = f"{CF_BASE}{bp}/search?search={urllib.parse.quote(query)}"
-        html = _cf_get(url)
-        results = _extract_search_results(html, bp, project_type, limit)
-        _set_cache(cache_key, results)
+        search_url = f"{CF_BASE}{bp}/search?search={urllib.parse.quote(query)}"
+        html = _cf_get_html(search_url)
+
+        seen = set()
+        slugs = []
+        for m in re.finditer(rf'{re.escape(bp)}/([a-zA-Z0-9_-]+)', html):
+            slug = m.group(1)
+            if slug in seen or slug in ("search", "files", "download"):
+                continue
+            seen.add(slug)
+            slugs.append(slug)
+
+        # Look up each slug via API by fetching project page
+        results = []
+        for slug in slugs[:limit]:
+            result = _scrape_project_card(slug, project_type, html)
+            if result:
+                results.append(result)
         return results
     except Exception as e:
         return {"error": str(e)}
 
 
-def _extract_search_results(html, bp, project_type, limit):
-    """Parse project cards from search HTML — single pass."""
-    results = []
-    seen_slugs = set()
+def _scrape_project_card(slug, project_type, search_html=""):
+    """Extract a project's info from search HTML (no extra request)."""
+    bp = _base_path(project_type)
+    title = slug.replace("-", " ").title()
+    desc = ""
+    icon_url = ""
+    author = ""
+    downloads = 0
 
-    # Split by project-card divs — CurseForge uses <div class="...project-card...">
-    cards = re.split(r'<div[^>]*class="[^"]*project-card[^"]*"[^>]*>', html)
-    if len(cards) < 2:
-        # Fallback: no project-card found
-        return results
+    if search_html:
+        # Find the card block containing this slug
+        card = re.search(
+            rf'href="{re.escape(bp)}/{re.escape(slug)}"[^>]*>.*?(?=<div[^>]*class="[^"]*project-card)',
+            search_html, re.DOTALL)
+        if card:
+            block = card.group()
+        else:
+            block = search_html
 
-    for block in cards[1:]:
-        if len(results) >= limit:
-            break
-        if not block.strip():
-            continue
-
-        # Get the slug
-        m = re.search(r'href="' + re.escape(bp) + r'/([a-zA-Z0-9_-]+)"', block)
-        if not m:
-            continue
-        slug = m.group(1)
-        if slug in seen_slugs or slug in ("search", "files", "download"):
-            continue
-        seen_slugs.add(slug)
-
-        # Title
-        title = slug.replace("-", " ").title()
         mt = re.search(r'<a[^>]*class="name"[^>]*>\s*([^<]+?)\s*</a>', block)
         if mt:
             title = mt.group(1).strip()
-
-        # Icon
-        icon_url = ""
         mi = re.search(r'<img[^>]*src="([^"]+)"', block)
         if mi:
             icon_url = mi.group(1)
             if icon_url.startswith("//"):
                 icon_url = "https:" + icon_url
-
-        # Description
-        desc = ""
         for pat in [r'<span[^>]*class="description"[^>]*>\s*([^<]+?)\s*</span>',
                      r'<p[^>]*>\s*([^<]{15,}?)\s*</p>']:
             md = re.search(pat, block, re.IGNORECASE)
             if md:
                 desc = md.group(1).strip()
                 break
-
-        # Author — from /members/ links in the card block
-        author = ""
         ma = re.search(r'href="/members/([^"]+)"', block)
         if ma:
             author = ma.group(1)
-        if not author:
-            ma = re.search(r'By\s*<a[^>]*>\s*([^<]+?)\s*</a>', block, re.IGNORECASE)
-            if ma:
-                author = ma.group(1).strip()
-
-        # Downloads
-        downloads = 0
         m_dl = re.search(r'"downloadCount":\s*(\d+)', block)
         if not m_dl:
             m_dl = re.search(r'>\s*([\d.]+[KMB]?)\s*</li>', block)
         if m_dl:
             downloads = _parse_download_count(m_dl.group(1))
 
-        results.append({
-            "id": slug, "title": title, "slug": slug,
-            "author": author, "downloads": downloads, "icon_url": icon_url,
-            "description": desc, "latest_version": "",
-            "project_type": project_type, "provider": "curseforge",
-            "page_url": f"{CF_BASE}{bp}/{slug}",
-        })
-
-    return results
+    return {
+        "id": slug, "title": title, "slug": slug,
+        "author": author, "downloads": downloads, "icon_url": icon_url,
+        "description": desc, "latest_version": "",
+        "project_type": project_type, "provider": "curseforge",
+        "page_url": f"{CF_BASE}{bp}/{slug}",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  VERSIONS
+#  VERSIONS — via API proxy
 # ═══════════════════════════════════════════════════════════════════════
 
 def curseforge_versions(project_id, project_type="mod", limit=20):
-    """Parse available files for a CurseForge project."""
-    cache_key = f"cf_versions:{project_type}:{project_id}:{limit}"
+    """Fetch available files for a CurseForge project."""
+    cache_key = f"cf_api_versions:{project_type}:{project_id}:{limit}"
     cached = _cached(cache_key, ttl=120)
     if cached:
         return cached
+
+    # Try resolving slug to numeric ID if needed
+    resolved = project_id
+    if not project_id.isdigit():
+        resolved = _slug_to_id(project_id)
+    data = _api_versions(resolved, limit)
+    if data is not None:
+        _set_cache(cache_key, data)
+        return data
+    return []
+
+
+def _api_versions(project_id, limit):
+    """Fetch files via API proxy."""
     try:
-        bp = _base_path(project_type)
-        html = _cf_get(f"{CF_BASE}{bp}/{project_id}")
-        versions = _extract_versions(html, bp, project_id, limit)
-        _set_cache(cache_key, versions)
+        path = f"/mods/{project_id}/files?pageSize={limit}"
+        data = _api_get(path)
+        versions = []
+        for f_item in data.get("data", []):
+            gv = f_item.get("gameVersions", [])
+            loaders = [v for v in gv if v.lower() in ("forge", "fabric", "neoforge", "quilt", "rift")]
+            mc_vers = [v for v in gv if v.lower() not in ("forge", "fabric", "neoforge", "quilt", "rift")]
+
+            file_entry = {
+                "url": f_item.get("downloadUrl", ""),
+                "filename": f_item.get("fileName", f"file-{f_item.get('id', '')}"),
+                "size": f_item.get("fileLength", 0),
+            }
+
+            versions.append({
+                "id": str(f_item.get("id", "")),
+                "name": f_item.get("displayName", f_item.get("fileName", "")),
+                "version_number": f_item.get("fileName", f"file-{f_item.get('id', '')}"),
+                "game_versions": mc_vers,
+                "loaders": loaders,
+                "files": [file_entry],
+                "date": f_item.get("fileDate", ""),
+            })
+
         return versions
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        return None
 
 
-def _extract_versions(html, bp, project_id, limit):
-    """Extract file listings from the project page."""
-    versions = []
-    seen_ids = set()
-
-    # File IDs from download/file links
-    fids = []
-    for m in re.finditer(r'/(?:download|files)/(\d+)', html):
-        fid = m.group(1)
-        if fid not in seen_ids:
-            seen_ids.add(fid)
-            fids.append(fid)
-
-    fnames = re.findall(r'"fileName":"([^"]*)"', html)
-    gvl = re.findall(r'"gameVersions":\[([^\]]*)\]', html)
-
-    for i, fid in enumerate(fids[:limit]):
-        fname = fnames[i] if i < len(fnames) else f"file-{fid}"
-        gv_raw = gvl[i] if i < len(gvl) else ""
-        gv = [v.strip('"') for v in gv_raw.split(",") if v.strip()]
-        versions.append({
-            "id": fid, "name": fname, "version_number": fname,
-            "game_versions": gv, "loaders": [],
-            "files": [{"url": f"{CF_BASE}{bp}/{project_id}/download/{fid}",
-                       "filename": fname, "size": 0}],
-            "date": "",
-        })
-
-    return versions
+def _slug_to_id(slug):
+    """Resolve a CurseForge slug to a numeric project ID via the API."""
+    try:
+        data = _api_get(f"/mods/search?gameId={GAME_ID}&searchFilter={slug}&slug={slug}&pageSize=1")
+        hits = data.get("data", [])
+        if hits:
+            return str(hits[0].get("id", slug))
+    except Exception:
+        pass
+    return slug
 
 
 def curseforge_download_url(project_slug, file_id, project_type="mod"):
-    bp = _base_path(project_type)
-    return f"{CF_BASE}{bp}/{project_slug}/download/{file_id}"
+    """Get the download URL for a specific file (via API proxy)."""
+    try:
+        data = _api_get(f"/mods/{project_slug}/files/{file_id}/download-url")
+        if data and "data" in data:
+            url = data["data"]
+            if url:
+                return url
+    except Exception:
+        pass
+    # Fallback: return the CurseForge page URL
+    return f"{CF_BASE}{_base_path(project_type)}/{project_slug}/download/{file_id}"
