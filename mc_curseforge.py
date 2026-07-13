@@ -1,14 +1,10 @@
-"""CurseForge integration via official API or community proxy.
+"""CurseForge integration via the official CurseForge API.
 
-Uses the official CurseForge API (https://api.curseforge.com/v1) when an
-API key is configured via the webconsole Settings UI. Falls back to the
-community proxy (api.curse.tools) if no key is set.
+Requires an API key configured via the webconsole Settings UI.
+No proxy fallback — the official API is the only path.
 
-Official CurseForge API reference:
+Official API reference:
   https://docs.curseforge.com/rest-api/
-
-The community proxy mirrors the official API at:
-  https://api.curse.tools/v1/cf/
 """
 
 import json
@@ -23,11 +19,8 @@ import mc_state
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-# CurseForge API endpoints
-# Official API requires an API key (set via the Settings UI).
-# The community proxy (curse.tools) works without a key but may be less reliable.
-CF_API_OFFICIAL = "https://api.curseforge.com/v1"
-CF_API_PROXY = "https://api.curse.tools/v1/cf"
+# Official CurseForge API base
+CF_API = "https://api.curseforge.com/v1"
 CF_BASE = "https://www.curseforge.com"
 GAME_ID = 432  # Minecraft
 
@@ -67,25 +60,33 @@ def _set_cache(key, value):
 
 # ── HTTP helpers ─────────────────────────────────────────────────────
 
-def _get_api_base():
-    """Return the API base URL and auth headers based on whether a key is configured."""
+def _auth_headers():
+    """Get the x-api-key header from config, or raise if unset."""
     api_key = mc_state.get_cf_api_key()
-    if api_key:
-        return CF_API_OFFICIAL, {"x-api-key": api_key}
-    return CF_API_PROXY, {}
+    if not api_key:
+        raise ValueError(
+            "No CurseForge API key configured. "
+            "Go to the Settings page to add one."
+        )
+    return {"x-api-key": api_key, "User-Agent": UA}
 
 
 def _api_get(path, timeout=15):
-    """Call the CurseForge API and return parsed JSON.
-
-    Uses the official API (with x-api-key) when a key is configured in
-    the settings, otherwise falls back to the community proxy.
-    """
-    base, extra_headers = _get_api_base()
-    url = f"{base}{path}"
-    headers = {"User-Agent": UA}
-    headers.update(extra_headers)
+    """Call the official CurseForge API (GET) and return parsed JSON."""
+    headers = _auth_headers()
+    url = f"{CF_API}{path}"
     req = urllib.request.Request(url, headers=headers)
+    res = urllib.request.urlopen(req, timeout=timeout)
+    return json.loads(res.read())
+
+
+def _api_post(path, body, timeout=30):
+    """Call the official CurseForge API (POST) and return parsed JSON."""
+    headers = _auth_headers()
+    headers["Content-Type"] = "application/json"
+    url = f"{CF_API}{path}"
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers)
     res = urllib.request.urlopen(req, timeout=timeout)
     return json.loads(res.read())
 
@@ -127,7 +128,7 @@ def _parse_download_count(text):
 # ═══════════════════════════════════════════════════════════════════════
 
 def curseforge_search(query, project_type="mod", limit=20):
-    """Search CurseForge via API proxy (fast JSON)."""
+    """Search CurseForge via the official API."""
     cache_key = f"cf_api_search:{project_type}:{query}:{limit}"
     cached = _cached(cache_key, ttl=60)
     if cached:
@@ -137,9 +138,7 @@ def curseforge_search(query, project_type="mod", limit=20):
     if data is not None:
         _set_cache(cache_key, data)
         return data
-
-    # API failed — fall back to scraping
-    return _scrape_search(query, project_type, limit)
+    return {"error": "API request failed"}
 
 
 def _api_search(query, project_type, limit):
@@ -350,3 +349,39 @@ def curseforge_download_url(project_slug, file_id, project_type="mod"):
         pass
     # Fallback: return the CurseForge page URL
     return f"{CF_BASE}{_base_path(project_type)}/{project_slug}/download/{file_id}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  BATCH FILE LOOKUP — via official API
+# ═══════════════════════════════════════════════════════════════════════
+
+def curseforge_get_files(file_ids):
+    """Resolve a list of CurseForge file IDs to download details.
+
+    Uses ``POST /v1/mods/files`` which accepts up to 50 IDs per call.
+    Larger lists are auto-chunked.
+
+    Returns a dict: ``{file_id: {"downloadUrl": str, "filename": str, "size": int}}``
+    Raised-valued items failed resolution.
+    """
+    if not file_ids:
+        return {}
+
+    result = {}
+    batch_size = 50
+    for i in range(0, len(file_ids), batch_size):
+        batch = file_ids[i:i + batch_size]
+        try:
+            data = _api_post("/mods/files", {"fileIds": batch})
+            for f_item in data.get("data", []):
+                fid = f_item.get("id", 0)
+                result[fid] = {
+                    "downloadUrl": f_item.get("downloadUrl") or "",
+                    "filename": f_item.get("fileName", f"file-{fid}.jar"),
+                    "size": f_item.get("fileLength", 0),
+                    "id": fid,
+                }
+        except Exception as e:
+            for fid in batch:
+                result[fid] = {"downloadUrl": "", "filename": f"file-{fid}", "size": 0, "error": str(e)}
+    return result

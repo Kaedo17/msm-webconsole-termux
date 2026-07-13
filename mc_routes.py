@@ -619,47 +619,39 @@ def register_routes(app, html):
                                 update_progress(tid, phase="downloading", message=f"Downloading 0/{total_mods} mods...")
 
                                 if mod_files:
+                                    from mc_curseforge import curseforge_get_files
                                     import concurrent.futures
-                                    _dl_lock = _thr.Lock()
                                     cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                              "AppleWebKit/537.36")
 
-                                    # Use official API with key if available, else proxy
-                                    cf_key = mc_state.get_cf_api_key()
-                                    cf_api = ("https://api.curseforge.com/v1" if cf_key
-                                              else "https://api.curse.tools/v1/cf")
+                                    # Resolve ALL file IDs in one batch call
+                                    file_ids = [mf.get("fileID", 0) for mf in mod_files if mf.get("fileID")]
+                                    file_map = curseforge_get_files(file_ids)
+
+                                    # Download each file concurrently
+                                    _dl_lock = _thr.Lock()
 
                                     def _dl_one(mf):
-                                        pid = mf.get("projectID")
-                                        fid = mf.get("fileID")
-                                        if not pid or not fid:
-                                            return False, None
-                                        fn = None
+                                        fid = mf.get("fileID", 0)
+                                        info = file_map.get(fid, {})
+                                        du = info.get("downloadUrl", "") if info else ""
+                                        fn = info.get("filename", f"file-{fid}.jar") if info else f"file-{fid}"
+                                        if not du:
+                                            return False, fn  # API returned no URL
                                         try:
-                                            url = f"{cf_api}/mods/{pid}/files/{fid}"
-                                            headers = {"User-Agent": cf_ua}
-                                            if cf_key:
-                                                headers["x-api-key"] = cf_key
-                                            req = urllib.request.Request(url, headers=headers)
-                                            resp = urllib.request.urlopen(req, timeout=15)
-                                            fd = json.loads(resp.read()).get("data", {})
-                                            du = fd.get("downloadUrl", "")
-                                            fn = fd.get("fileName", f"{pid}-{fid}.jar")
-                                            if du and ".jar" in fn.lower():
-                                                dq = urllib.request.Request(du, headers=headers)
-                                                dr = urllib.request.urlopen(dq, timeout=45)
-                                                jp = mods_dir / fn
-                                                jp.parent.mkdir(parents=True, exist_ok=True)
-                                                with open(jp, "wb") as jf:
-                                                    while True:
-                                                        c = dr.read(65536)
-                                                        if not c:
-                                                            break
-                                                        jf.write(c)
-                                                return True, fn
-                                            return False, fn
+                                            dq = urllib.request.Request(du, headers={"User-Agent": cf_ua})
+                                            dr = urllib.request.urlopen(dq, timeout=45)
+                                            jp = mods_dir / fn
+                                            jp.parent.mkdir(parents=True, exist_ok=True)
+                                            with open(jp, "wb") as jf:
+                                                while True:
+                                                    c = dr.read(65536)
+                                                    if not c:
+                                                        break
+                                                    jf.write(c)
+                                            return True, fn
                                         except Exception:
-                                            return False, fn or "unknown"
+                                            return False, fn
 
                                     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                                         futs = [pool.submit(_dl_one, mf) for mf in mod_files]
