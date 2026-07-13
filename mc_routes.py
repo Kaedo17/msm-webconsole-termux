@@ -501,49 +501,48 @@ def register_routes(app, html):
         online_players = list(inst.status_cache.get("players", []))
         online_set = {p.lower() for p in online_players}
 
+        # Build a name map: lowercase -> (preferred name, uuid)
+        # Priority for preferred name: ops > whitelist > banned > usercache
+        # This ensures the most authoritative source's casing is used.
         seen = set()
-        players = []
-        # Seed from usercache
+        name_map = {}
+
+        # Collect all known names with their preferred source
         for entry in usercache:
-            name = entry.get("name", "")
-            uuid = entry.get("uuid", "")
-            if not name or name.lower() in seen:
-                continue
-            seen.add(name.lower())
-            players.append({
-                "name": name,
-                "uuid": uuid,
-                "online": name.lower() in online_set,
-                "whitelisted": name.lower() in whitelist_map,
-                "banned": name.lower() in banned_map,
-                "op": name.lower() in ops_map,
-            })
-        # Also add online players not in usercache
+            nl = entry.get("name", "").lower()
+            if nl and nl not in name_map:
+                name_map[nl] = {"name": entry.get("name", ""), "uuid": entry.get("uuid", "")}
+        for entry in whitelist:
+            nl = entry.get("name", "").lower()
+            if nl:
+                name_map[nl] = {"name": entry.get("name", ""), "uuid": entry.get("uuid", "")}
+        for entry in banned:
+            nl = entry.get("name", "").lower()
+            if nl:
+                name_map[nl] = {"name": entry.get("name", ""), "uuid": entry.get("uuid", "")}
+        for entry in ops:
+            nl = entry.get("name", "").lower()
+            if nl:
+                name_map[nl] = {"name": entry.get("name", ""), "uuid": entry.get("uuid", "")}
+
+        # Also add online players not already known
         for name in online_players:
-            if name.lower() not in seen:
-                seen.add(name.lower())
-                players.append({
-                    "name": name,
-                    "uuid": "",
-                    "online": True,
-                    "whitelisted": name.lower() in whitelist_map,
-                    "banned": name.lower() in banned_map,
-                    "op": name.lower() in ops_map,
-                })
-        # Add whitelisted/banned/opped players not yet in the list
-        for name_map, flag in [(whitelist_map, "whitelisted"),
-                                (banned_map, "banned"), (ops_map, "op")]:
-            for name_lower, original_name in name_map.items():
-                if name_lower not in seen:
-                    seen.add(name_lower)
-                    players.append({
-                        "name": original_name,
-                        "uuid": "",
-                        "online": name_lower in online_set,
-                        "whitelisted": name_lower in whitelist_map,
-                        "banned": name_lower in banned_map,
-                        "op": name_lower in ops_map,
-                    })
+            nl = name.lower()
+            if nl not in name_map:
+                name_map[nl] = {"name": name, "uuid": ""}
+
+        # Build the final list
+        players = []
+        for nl, info in name_map.items():
+            players.append({
+                "name": info["name"],
+                "uuid": info["uuid"],
+                "online": nl in online_set,
+                "whitelisted": nl in whitelist_map,
+                "banned": nl in banned_map,
+                "op": nl in ops_map,
+            })
+
         return players
 
     @app.route("/api/servers/<sid>/players")
