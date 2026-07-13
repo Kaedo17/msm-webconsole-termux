@@ -2326,6 +2326,7 @@ function renderPlayersTable() {
     } else {
       actions += `<button class="btn btn-unban" onclick="doPlayerAction('pardon','${p.name}')">Unban</button>`;
     }
+    actions += `<button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="doPlayerAction('remove','${p.name}')">Remove</button>`;
     actions += '</div>';
 
     const uuidHtml = p.uuid ? `<span class="player-uuid hide-mobile">${p.uuid.substring(0,8)}</span>` : '';
@@ -2349,7 +2350,8 @@ async function doPlayerAction(cmd, name) {
     'pardon': 'Unban',
     'op': 'OP',
     'deop': 'DeOp',
-    'kick': 'Kick'
+    'kick': 'Kick',
+    'remove': 'Remove'
   };
   const label = actionLabels[cmd] || cmd;
   // Confirm for destructive actions
@@ -2361,6 +2363,9 @@ async function doPlayerAction(cmd, name) {
   }
   if (cmd === 'kick') {
     if (!confirm(`Kick "${name}" from the server?`)) return;
+  }
+  if (cmd === 'remove') {
+    if (!confirm(`Remove "${name}" from all player files? This removes them from usercache, whitelist, ops, and bans.`)) return;
   }
 
   const btn = event?.target;

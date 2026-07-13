@@ -643,6 +643,19 @@ def register_routes(app, html):
             return True, f"{name} added to known players."
         return False, "Failed to write usercache.json."
 
+    def _remove_player_completely(inst, name):
+        """Remove a player from all server files: usercache, whitelist, ops, banned."""
+        removed_from = []
+        for filename in ["usercache.json", "whitelist.json", "ops.json", "banned-players.json"]:
+            entries = _read_player_file(inst, filename)
+            filtered = [e for e in entries if e.get("name", "").lower() != name.lower()]
+            if len(filtered) < len(entries):
+                if _write_player_file(inst, filename, filtered):
+                    removed_from.append(filename)
+        if removed_from:
+            return True, f"{name} removed from: {', '.join(removed_from)}"
+        return False, f"{name} not found in any player files."
+
     @app.route("/api/servers/<sid>/players/send", methods=["POST"])
     def api_players_send(sid):
         """Generic endpoint to run a command for player management (whitelist, ban, etc.)."""
@@ -681,6 +694,8 @@ def register_routes(app, html):
             ok_, msg = _remove_op_entry(inst, name)
         elif cmd_lower == "kick":
             return ok({"message": "Cannot kick when server is offline.", "offline": True})
+        elif cmd_lower == "remove":
+            ok_, msg = _remove_player_completely(inst, name)
         elif add_only or cmd_lower == "add":
             ok_, msg = _add_usercache_entry(inst, name)
         else:
