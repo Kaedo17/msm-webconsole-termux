@@ -2240,7 +2240,7 @@ function startPlayerPoll() {
       const d = await get('/api/players');
       if (d.ok) { _allPlayers = d.players || []; renderPlayersTable(); }
     } catch(e) {}
-  }, 5000);
+  }, 2000);
 }
 
 function stopPlayerPoll() {
