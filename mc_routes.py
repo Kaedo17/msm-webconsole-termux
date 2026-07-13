@@ -572,40 +572,42 @@ def register_routes(app, html):
 
                         with zipfile.ZipFile(str(dest), "r") as zf:
                             entries = [e for e in zf.infolist() if not e.filename.endswith("/")]
+
+                            # Detect a common root directory wrapper (e.g. "cursed-walking-server/")
+                            # so we can strip it and extract content directly to the right places.
+                            strip_prefix = ""
+                            if entries:
+                                first_seg = entries[0].filename.split("/")[0]
+                                if first_seg and all(e.filename.startswith(first_seg + "/") for e in entries):
+                                    strip_prefix = first_seg + "/"
+
                             total_entries = len(entries)
                             for idx, entry in enumerate(entries):
                                 update_progress(tid, current=idx+1, total=total_entries,
                                                 phase="extracting", message=f"Extracting {entry.filename}")
-                                if entry.filename.startswith("overrides/"):
-                                    rel = entry.filename[10:]
+                                # Strip the common root folder for prefix matching and target paths
+                                raw = entry.filename
+                                rel = raw[len(strip_prefix):] if strip_prefix else raw
+                                if rel.startswith("overrides/"):
+                                    rel = rel[10:]
                                     if rel:
                                         target = inst.dir / rel
                                         target.parent.mkdir(parents=True, exist_ok=True)
-                                        zf.extract(entry, str(inst.dir))
-                                        tmp = inst.dir / "overrides" / rel
-                                        if tmp.exists() and tmp != target:
-                                            target.parent.mkdir(parents=True, exist_ok=True)
-                                            target.write_bytes(tmp.read_bytes())
-                                            tmp.unlink()
+                                        target.write_bytes(zf.read(raw))
                                         extracted.append(rel)
-                                elif entry.filename.startswith("server-overrides/"):
-                                    rel = entry.filename[17:]
+                                elif rel.startswith("server-overrides/"):
+                                    rel = rel[17:]
                                     if rel:
                                         target = inst.dir / rel
                                         target.parent.mkdir(parents=True, exist_ok=True)
-                                        zf.extract(entry, str(inst.dir))
-                                        tmp = inst.dir / "server-overrides" / rel
-                                        if tmp.exists() and tmp != target:
-                                            target.parent.mkdir(parents=True, exist_ok=True)
-                                            target.write_bytes(tmp.read_bytes())
-                                            tmp.unlink()
+                                        target.write_bytes(zf.read(raw))
                                         extracted.append(rel)
-                                elif entry.filename.startswith("mods/"):
-                                    rel = entry.filename[5:]
+                                elif rel.startswith("mods/"):
+                                    rel = rel[5:]
                                     if rel:
                                         target = mods_dir / rel
                                         target.parent.mkdir(parents=True, exist_ok=True)
-                                        zf.extract(entry, str(mods_dir.parent))
+                                        target.write_bytes(zf.read(raw))
                                         extracted.append(rel)
 
                             for fld in ["overrides", "server-overrides", "client-overrides"]:
