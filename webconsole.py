@@ -546,14 +546,20 @@ HTML = r"""<!DOCTYPE html>
     <select id="csType" onchange="onCsTypeChange()" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
     </select>
     <label style="font-size:13px;color:#888;display:block;margin-top:10px">Minecraft Version</label>
-    <select id="csVersion" onchange="onCsVersionChange()" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
-      <option value="">Loading...</option>
-    </select>
+    <div id="csVersionRow" style="display:flex;gap:6px;align-items:center">
+      <select id="csVersion" onchange="onCsVersionChange()" style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+        <option value="">Loading...</option>
+      </select>
+      <input type="text" id="csVersionManual" placeholder="e.g. 1.20.4" style="display:none;flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+    </div>
     <div id="forgeVersionRow" style="display:none">
       <label style="font-size:13px;color:#888;display:block;margin-top:10px">Forge Version</label>
-      <select id="csForgeVersion" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
-        <option value="">Select Forge version...</option>
-      </select>
+      <div id="csForgeVersionRow" style="display:flex;gap:6px;align-items:center">
+        <select id="csForgeVersion" style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+          <option value="">Select Forge version...</option>
+        </select>
+        <input type="text" id="csForgeVersionManual" placeholder="e.g. 40.2.0" style="display:none;flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+      </div>
     </div>
     <div style="display:flex;gap:12px;margin-top:10px">
       <div style="flex:1"><label style="font-size:13px;color:#888">Min RAM</label><input type="range" id="csMinRam" min="512" max="8192" step="256" value="512" style="width:100%;accent-color:#5ced73" oninput="document.getElementById('csMinRamVal').textContent=fmtRamMb(parseInt(this.value))"><span id="csMinRamVal" style="font-size:14px;color:#5ced73;font-weight:bold;display:block;text-align:center;margin-top:2px">512 MB</span></div>
@@ -971,14 +977,18 @@ function showCreateServerModal() {
     $('csType').value = firstType;
     const versions = (d && d.ok && d.versions) ? d.versions : [];
     if (versions.length) {
-      let vhtml = '';
+      let vhtml = '<option value="">Select version...</option>';
       for (const v of versions) vhtml += `<option>${v}</option>`;
       $('csVersion').innerHTML = vhtml;
+      $('csVersion').style.display = '';
+      $('csVersionManual').style.display = 'none';
       $('csVersion').disabled = false;
     } else {
-      $('csVersion').innerHTML = '<option value="">Enter version manually below</option>';
+      $('csVersion').style.display = 'none';
+      $('csVersionManual').style.display = '';
+      $('csVersionManual').value = '';
+      $('csVersionManual').placeholder = 'Enter version (e.g. 1.20.4)';
       $('csVersion').disabled = false;
-      $('csVersion').style.background = '#1a1a1a';
     }
     $('csCreateBtn').disabled = false;
     onCsTypeChange();
@@ -1012,26 +1022,35 @@ async function loadForgeVersions() {
   if (!mcVer) return;
   const d = await get(`/api/versions/forge?mc_version=${mcVer}`);
   if (!d.ok || !d.forge_versions || !d.forge_versions.length) {
-    $('csForgeVersion').innerHTML = '<option value="">No versions available</option>';
+    $('csForgeVersion').style.display = 'none';
+    $('csForgeVersionManual').style.display = '';
+    $('csForgeVersionManual').value = '';
+    $('csForgeVersionManual').placeholder = 'Enter Forge version (e.g. 47.3.0)';
     return;
   }
-  let html = '';
+  $('csForgeVersion').style.display = '';
+  $('csForgeVersionManual').style.display = 'none';
+  let html = '<option value="">Select Forge version...</option>';
   let first = '';
   for (const v of d.forge_versions) {
     if (!first) first = v;
     html += `<option>${v}</option>`;
   }
   $('csForgeVersion').innerHTML = html;
-  $('csForgeVersion').value = first;
+  $('csForgeVersion').value = first || '';
 }
 
 async function doCreateServer() {
   const name = $('csName').value.trim();
   if (!name) { toast('Enter a server name', 'error'); return; }
   const jt = $('csType').value;
-  const mcVer = $('csVersion').value;
-  const forgeVer = $('csForgeVersion')?.value || '';
-  if (jt === 'forge' && !forgeVer) { toast('No Forge version available. Check MC version or internet.', 'error'); closeModal('createServerModal'); return; }
+  const mcVer = $('csVersion').style.display === 'none' ? $('csVersionManual').value.trim() : $('csVersion').value;
+  const forgeVer = $('csForgeVersion').style.display === 'none' ? $('csForgeVersionManual').value.trim() : ($('csForgeVersion')?.value || '');
+  if (jt === 'forge' && !forgeVer) {
+    toast('Enter a Forge version or check internet connection.', 'error');
+    closeModal('createServerModal');
+    return;
+  }
   const minRam = valToRam($('csMinRam').value);
   const maxRam = valToRam($('csMaxRam').value);
   if ($('csEula') && !$('csEula').checked) { toast('You must accept the EULA', 'error'); return; }
@@ -1152,6 +1171,30 @@ async function loadDashboard() {
       </div>
       <div style="font-size:12px;color:#666;margin-top:8px">Stop server before changing</div>
     </div>
+    <div style="margin-top:16px;padding:16px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px">
+      <h3 style="margin-bottom:8px;font-size:14px;color:#888;text-transform:uppercase">Java Configuration</h3>
+      <div style="display:flex;gap:12px;align-items:start;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <label style="font-size:12px;color:#888">Java Version</label>
+          <div style="margin-top:4px">
+            <span style="color:#fdd835;font-size:14px">${d.java_version||'Java (default)'}</span>
+            <span style="font-size:12px;color:#666;margin-left:8px">(MC ${d.mc_version||'?'})</span>
+          </div>
+        </div>
+        <div style="flex:2;min-width:250px">
+          <label style="font-size:12px;color:#888">Override Java Path <span style="color:#666">(leave empty for auto)</span></label>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <select id="javaOverrideSelect" onchange="document.getElementById('javaOverrideInput').value=this.value" style="flex:1;padding:6px 8px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:12px;outline:none">
+              <option value="">Auto-detect</option>
+              ${(d.java_options||[]).map(o => `<option value="${o.path}">${o.ver} — ${o.path}</option>`).join('')}
+            </select>
+            <input type="text" id="javaOverrideInput" placeholder="/path/to/java" value="${d.java_bin||''}" style="flex:2;padding:6px 8px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:13px;outline:none;min-width:0">
+            <button class="btn btn-save" id="javaSaveBtn" style="padding:6px 14px;font-size:12px;white-space:nowrap" onclick="saveJavaConfig()">Save</button>
+          </div>
+        </div>
+      </div>
+      <div id="javaSaveStatus" style="font-size:11px;color:#666;margin-top:6px"></div>
+    </div>
   `;
 }
 
@@ -1164,6 +1207,40 @@ async function saveRam() {
   const d = await api('ram', {min_ram: min, max_ram: max});
   btn.textContent = 'Save RAM';
   btn.disabled = false;
+}
+
+async function saveJavaConfig() {
+  const javaBin = $('javaOverrideInput').value.trim();
+  const btn = $('javaSaveBtn');
+  const status = $('javaSaveStatus');
+  if (!_currentServer) { toast('Select a server first', 'error'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  status.textContent = '';
+  try {
+    const r = await fetch(`/api/servers/${_currentServer}/java`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({java_bin: javaBin})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      status.textContent = javaBin ? 'Java path saved! Restart to apply.' : 'Auto-detect enabled. Restart to apply.';
+      status.style.color = '#5ced73';
+      toast(d.message || 'Java config saved', 'success');
+      loadDashboard();
+    } else {
+      status.textContent = d.error || 'Failed to save';
+      status.style.color = '#ff4444';
+      toast(d.error || 'Failed to save', 'error');
+    }
+  } catch(e) {
+    status.textContent = 'Network error';
+    status.style.color = '#ff4444';
+    toast('Network error', 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = 'Save';
 }
 
 // ── Properties / Settings ──

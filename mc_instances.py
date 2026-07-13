@@ -80,6 +80,7 @@ class ServerInstance:
             java_ver = mc_state.get_java_label_for_version(self.mc_version)
         else:
             java_ver = mc_state.get_java_label(mc_state.JAVA_BIN)
+        java_opts = mc_state.detect_java_versions()
         return {
             "id": self.id,
             "name": self.name,
@@ -98,6 +99,7 @@ class ServerInstance:
             "jar_type": self.jar_type,
             "mc_version": self.mc_version,
             "java_version": java_ver,
+            "java_options": [{"ver": k, "path": v} for k, v in sorted(java_opts.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)],
         }
 
     def save_config(self):

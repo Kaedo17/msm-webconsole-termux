@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 
 from flask import request, Response  # type: ignore
+from pathlib import Path
 from werkzeug.utils import secure_filename  # type: ignore
 
 def _get_local_ip():
@@ -169,6 +170,30 @@ def register_routes(app, html):
         data = parse_json_body()
         ok_, msg = stop_server(inst, int(data.get("seconds", 15)))
         return ok({"message": msg}) if ok_ else fail(msg)
+
+    @app.route("/api/servers/<sid>/java", methods=["GET", "POST"])
+    def api_java(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        if request.method == "GET":
+            java_opts = mc_state.detect_java_versions()
+            return ok({
+                "java_bin": inst.java_bin if inst.java_bin else "",
+                "mc_version": inst.mc_version,
+                "java_version": inst.status_dict().get("java_version", "Java (default)"),
+                "java_options": [{"ver": k, "path": v} for k, v in sorted(java_opts.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)],
+            })
+        data = parse_json_body()
+        new_java_bin = data.get("java_bin", "").strip()
+        if new_java_bin and not Path(new_java_bin).exists():
+            return fail(f"Java binary not found: {new_java_bin}")
+        if inst.is_running():
+            return fail("Stop the server before changing Java.")
+        inst.java_bin = new_java_bin
+        inst.save_config()
+        msg = f"Java set to {new_java_bin}" if new_java_bin else "Java set to auto-detect"
+        return ok({"message": msg})
 
     @app.route("/api/servers/<sid>/restart", methods=["POST"])
     def api_restart(sid):
