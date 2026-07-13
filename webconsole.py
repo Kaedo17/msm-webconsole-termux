@@ -2108,27 +2108,26 @@ async function doAddPlayer() {
   const alsoWhitelist = $('apAlsoWhitelist').value === 'yes';
   closeModal('addPlayerModal');
 
-  // Try to add via whitelist command
   if (alsoWhitelist) {
     await sendPlayerCommand('whitelist add', name);
   } else {
-    await sendPlayerCommand('whitelist add', name);
+    await sendPlayerCommand('add', name, true);
   }
 
   toast(`Player "${name}" added` + (alsoWhitelist ? ' and whitelisted' : ''), 'success');
   loadPlayers();
 }
 
-async function sendPlayerCommand(cmd, name) {
+async function sendPlayerCommand(cmd, name, addOnly) {
   if (!_currentServer) { toast('Select a server first', 'error'); return null; }
   try {
     const r = await fetch(`/api/servers/${_currentServer}/players/send`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({command: cmd, name})
+      body: JSON.stringify({command: cmd, name, add_only: addOnly || false})
     });
     const d = await r.json();
-    if (!d.ok && !d.offline) toast(d.error || 'Command failed', 'error');
+    if (!d.ok) toast(d.error || 'Command failed', 'error');
     return d;
   } catch(e) {
     toast('Network error', 'error');
@@ -2290,7 +2289,7 @@ async function doPlayerAction(cmd, name) {
 
   const d = await sendPlayerCommand(cmd, name);
   if (btn) { btn.disabled = false; btn.textContent = label; }
-  if (d && (d.ok || d.offline)) {
+  if (d && d.ok) {
     toast(`"${name}" successfully ${cmd === 'whitelist add' ? 'whitelisted' : cmd === 'whitelist remove' ? 'unwhitelisted' : cmd === 'pardon' ? 'unbanned' : label.toLowerCase() + (cmd !== 'kick' ? 'ed' : '')}`, 'success');
     loadPlayers();
   }

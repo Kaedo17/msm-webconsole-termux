@@ -528,6 +528,96 @@ def register_routes(app, html):
         players = _build_player_list(inst)
         return ok({"players": players, "online_count": len([p for p in players if p["online"]])})
 
+    def _write_player_file(inst, filename, data):
+        """Write a list of dicts to a Minecraft JSON player file."""
+        path = inst.dir / filename
+        try:
+            path.write_text(json.dumps(data, indent=2))
+            return True
+        except Exception:
+            return False
+
+    def _add_whitelist_entry(inst, name):
+        entries = _read_player_file(inst, "whitelist.json")
+        # Check if already there
+        if any(e.get("name", "").lower() == name.lower() for e in entries):
+            return False, f"{name} is already whitelisted."
+        import uuid as _uuid
+        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
+        entries.append({"uuid": fake_uuid, "name": name})
+        if _write_player_file(inst, "whitelist.json", entries):
+            return True, f"{name} added to whitelist."
+        return False, "Failed to write whitelist.json."
+
+    def _remove_whitelist_entry(inst, name):
+        entries = _read_player_file(inst, "whitelist.json")
+        filtered = [e for e in entries if e.get("name", "").lower() != name.lower()]
+        if len(filtered) == len(entries):
+            return False, f"{name} is not whitelisted."
+        if _write_player_file(inst, "whitelist.json", filtered):
+            return True, f"{name} removed from whitelist."
+        return False, "Failed to write whitelist.json."
+
+    def _add_ban_entry(inst, name):
+        entries = _read_player_file(inst, "banned-players.json")
+        if any(e.get("name", "").lower() == name.lower() for e in entries):
+            return False, f"{name} is already banned."
+        from datetime import datetime, timezone
+        entries.append({
+            "uuid": "",
+            "name": name,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "source": "Web Console",
+            "expires": "forever",
+            "reason": "Banned by an operator."
+        })
+        if _write_player_file(inst, "banned-players.json", entries):
+            # Also remove from whitelist if present
+            _remove_whitelist_entry(inst, name)
+            return True, f"{name} banned."
+        return False, "Failed to write banned-players.json."
+
+    def _remove_ban_entry(inst, name):
+        entries = _read_player_file(inst, "banned-players.json")
+        filtered = [e for e in entries if e.get("name", "").lower() != name.lower()]
+        if len(filtered) == len(entries):
+            return False, f"{name} is not banned."
+        if _write_player_file(inst, "banned-players.json", filtered):
+            return True, f"{name} unbanned."
+        return False, "Failed to write banned-players.json."
+
+    def _add_op_entry(inst, name):
+        entries = _read_player_file(inst, "ops.json")
+        if any(e.get("name", "").lower() == name.lower() for e in entries):
+            return False, f"{name} is already an operator."
+        import uuid as _uuid
+        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
+        entries.append({"uuid": fake_uuid, "name": name, "level": 4})
+        if _write_player_file(inst, "ops.json", entries):
+            return True, f"{name} opped."
+        return False, "Failed to write ops.json."
+
+    def _remove_op_entry(inst, name):
+        entries = _read_player_file(inst, "ops.json")
+        filtered = [e for e in entries if e.get("name", "").lower() != name.lower()]
+        if len(filtered) == len(entries):
+            return False, f"{name} is not an operator."
+        if _write_player_file(inst, "ops.json", filtered):
+            return True, f"{name} deopped."
+        return False, "Failed to write ops.json."
+
+    def _add_usercache_entry(inst, name):
+        """Add a player to usercache.json so they appear in the player list."""
+        entries = _read_player_file(inst, "usercache.json")
+        if any(e.get("name", "").lower() == name.lower() for e in entries):
+            return False, f"{name} already in known players."
+        import uuid as _uuid
+        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
+        entries.append({"uuid": fake_uuid, "name": name})
+        if _write_player_file(inst, "usercache.json", entries):
+            return True, f"{name} added to known players."
+        return False, "Failed to write usercache.json."
+
     @app.route("/api/servers/<sid>/players/send", methods=["POST"])
     def api_players_send(sid):
         """Generic endpoint to run a command for player management (whitelist, ban, etc.)."""
@@ -537,16 +627,40 @@ def register_routes(app, html):
         data = parse_json_body()
         cmd = data.get("command", "").strip()
         name = data.get("name", "").strip()
+        add_only = data.get("add_only", False)
         if not cmd:
             return fail("No command provided.")
-        if name:
-            full_cmd = f"{cmd} {name}"
+
+        # If server is online, send the command via console
+        if inst.is_running():
+            if name:
+                full_cmd = f"{cmd} {name}"
+            else:
+                full_cmd = cmd
+            ok_, msg = send_server(inst, full_cmd)
+            return ok({"message": msg}) if ok_ else fail(msg)
+
+        # Server is offline — modify JSON files directly
+        cmd_lower = cmd.lower().strip()
+        if cmd_lower == "whitelist add":
+            ok_, msg = _add_whitelist_entry(inst, name)
+        elif cmd_lower == "whitelist remove":
+            ok_, msg = _remove_whitelist_entry(inst, name)
+        elif cmd_lower == "ban":
+            ok_, msg = _add_ban_entry(inst, name)
+        elif cmd_lower == "pardon":
+            ok_, msg = _remove_ban_entry(inst, name)
+        elif cmd_lower == "op":
+            ok_, msg = _add_op_entry(inst, name)
+        elif cmd_lower == "deop":
+            ok_, msg = _remove_op_entry(inst, name)
+        elif cmd_lower == "kick":
+            return ok({"message": "Cannot kick when server is offline.", "offline": True})
+        elif add_only or cmd_lower == "add":
+            ok_, msg = _add_usercache_entry(inst, name)
         else:
-            full_cmd = cmd
-        if not inst.is_running():
-            # If server is off, we can still modify JSON files directly
-            return ok({"message": f"Server is offline. Use console commands or edit files directly.", "offline": True})
-        ok_, msg = send_server(inst, full_cmd)
+            ok_, msg = _add_usercache_entry(inst, name)
+
         return ok({"message": msg}) if ok_ else fail(msg)
 
     # ═══════════════════════════════════════════════════════════════════
