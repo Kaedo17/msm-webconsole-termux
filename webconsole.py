@@ -404,7 +404,7 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-secondary" style="padding:4px 12px;font-size:12px;margin-left:auto" onclick="clearPackSelection()">Clear</button>
         </div>
         <div id="packInstalledList"></div>
-      </div><div class="page" id="page-backups">
+      </div></div><div class="page" id="page-backups">
       <div class="server-actions">
         <button class="btn btn-backup" onclick="createBackup()">Create Backup</button>
       </div>
@@ -1551,11 +1551,11 @@ function appendConsoleLine(out, line) {
 }
 
 function clearConsole() {
-  $('consoleOutput').innerHTML = '<span style="color:#555">Server not running — start it to see console output</span>';
+  $('consoleOutput').innerHTML = '';
 }
 
 function copyConsoleLogs() {
-  const lines = Array.from($('consoleOutput').children).map(el => el.textContent.replace(/^\S+\s/, '')).join('\n');
+  const lines = Array.from($('consoleOutput').children).map(el => el.textContent.trim()).filter(Boolean).join('\n');
   if (!lines) { toast('No console output to copy', 'info'); return; }
   navigator.clipboard.writeText(lines).then(() => toast('Console logs copied!', 'success')).catch(() => {
     const ta = document.createElement('textarea');
