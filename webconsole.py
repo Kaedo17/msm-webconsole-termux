@@ -297,6 +297,64 @@ HTML = r"""<!DOCTYPE html>
     .sidebar h2{padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
     .sidebar nav a{padding:16px 18px}
   }
+  /* ── Players Tab ── */
+  .players-toolbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .players-toolbar input{flex:1;min-width:160px;padding:9px 12px;background:#111;border:1px solid #333;border-radius:6px;color:var(--text);font-size:14px;outline:none}
+  .players-toolbar input:focus{border-color:var(--green)}
+  .players-toolbar .btn{padding:9px 16px}
+  .players-stats{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .players-stats .ps-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 16px;text-align:center;flex:1;min-width:80px}
+  .players-stats .ps-card .ps-val{font-size:20px;font-weight:700}
+  .players-stats .ps-card .ps-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .players-table-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .players-table{width:100%;border-collapse:collapse;font-size:13px}
+  .players-table th{background:var(--bg3);color:var(--text2);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border)}
+  .players-table td{padding:10px 12px;border-bottom:1px solid #1a1a1a;vertical-align:middle}
+  .players-table tr:last-child td{border-bottom:none}
+  .players-table tr:hover td{background:#151515}
+  .player-name{font-weight:600;color:var(--text)}
+  .player-uuid{font-size:11px;color:var(--text2);font-family:monospace;margin-left:6px}
+  .player-online{color:var(--green)}
+  .player-offline{color:#666}
+  .player-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-right:3px}
+  .player-badge.op{background:#1a3a2a;color:#5ced73}
+  .player-badge.whitelisted{background:#1a2a3a;color:#64b5f6}
+  .player-badge.banned{background:#3a1a1a;color:#ff4444}
+  .player-badge.online-badge{background:#1a3a1a;color:#69f0ae}
+  .player-actions{display:flex;gap:4px;flex-wrap:wrap}
+  .player-actions .btn{padding:4px 10px;font-size:11px;min-width:0}
+  .player-actions .btn-op{background:#1a3a2a;color:#5ced73;border:1px solid #2a5a3a}
+  .player-actions .btn-op:hover{background:#2a5a3a}
+  .player-actions .btn-deop{background:#2a1a1a;color:#ff8a80;border:1px solid #4a2a2a}
+  .player-actions .btn-deop:hover{background:#4a2a2a}
+  .player-actions .btn-whitelist{background:#1a2a3a;color:#64b5f6;border:1px solid #2a3a5a}
+  .player-actions .btn-whitelist:hover{background:#2a3a5a}
+  .player-actions .btn-unwhitelist{background:#2a2a1a;color:#ffd54f;border:1px solid #4a4a2a}
+  .player-actions .btn-unwhitelist:hover{background:#4a4a2a}
+  .player-actions .btn-ban{background:#3a1a1a;color:#ff4444;border:1px solid #5a2a2a}
+  .player-actions .btn-ban:hover{background:#5a2a2a}
+  .player-actions .btn-unban{background:#1a2a1a;color:#69f0ae;border:1px solid #2a4a2a}
+  .player-actions .btn-unban:hover{background:#2a4a2a}
+  .player-actions .btn-kick{background:#3a2a1a;color:#ffab40;border:1px solid #5a4a2a}
+  .player-actions .btn-kick:hover{background:#5a4a2a}
+  .player-empty{padding:40px;text-align:center;color:#666;font-size:14px}
+  .players-summary{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0d0d0d;border-bottom:1px solid var(--border);font-size:12px;color:#888}
+  .players-summary span{color:var(--text2)}
+  .players-summary .ps-green{color:var(--green)}
+  @media(max-width:768px){
+    .players-table td,.players-table th{padding:8px 10px}
+    .players-table{font-size:12px}
+    .player-actions .btn{padding:3px 8px;font-size:10px}
+    .players-toolbar input{min-width:120px;font-size:14px;padding:10px 12px}
+    .players-stats .ps-card{padding:8px 12px;min-width:60px}
+    .players-stats .ps-card .ps-val{font-size:17px}
+    .players-stats .ps-card .ps-label{font-size:10px}
+    .players-table .hide-mobile{display:none}
+  }
+  @media(max-width:480px){
+    .players-table-wrap{overflow-x:auto}
+    .players-toolbar{gap:6px}
+  }
 </style>
 </head>
 <body>
@@ -311,6 +369,7 @@ HTML = r"""<!DOCTYPE html>
     <a href="#" class="active" data-page="dashboard">Dashboard</a>
     <a href="#" data-page="servers">Servers</a>
     <a href="#" data-page="console">Console</a>
+    <a href="#" data-page="players">Players</a>
     <a href="#" data-page="properties">Settings</a>
     <a href="#" data-page="packs">Mods & Packs</a>
     <a href="#" data-page="files">File Manager</a>
@@ -352,6 +411,14 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-cmd" type="submit">Send</button>
         </form>
       </div>
+    </div>
+    <div class="page" id="page-players">
+      <div class="players-toolbar">
+        <input type="text" id="playerSearchInput" placeholder="Search players..." oninput="filterPlayersList()">
+        <button class="btn btn-secondary" onclick="loadPlayers()" title="Refresh">&#x21bb; Refresh</button>
+        <button class="btn btn-cmd" onclick="showAddPlayerModal()">+ Add Player</button>
+      </div>
+      <div id="playersContent" class="loading">Loading players...</div>
     </div>
     <div class="page" id="page-files">
       <div class="server-actions">
@@ -518,6 +585,22 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
+<div class="modal" id="addPlayerModal">
+  <div class="modal-box" style="min-width:380px">
+    <h3>Add Player</h3>
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Player Name</label>
+    <input type="text" id="apName" placeholder="Player123" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none" onkeydown="if(event.key==='Enter')doAddPlayer()">
+    <label style="font-size:13px;color:#888;display:block;margin-top:10px">Also whitelist?</label>
+    <select id="apAlsoWhitelist" style="width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:4px;color:#e0e0e0;outline:none">
+      <option value="yes">Yes — add to whitelist too</option>
+      <option value="no">No — just add to known players</option>
+    </select>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal('addPlayerModal')">Cancel</button>
+      <button class="btn btn-start" onclick="doAddPlayer()">Add Player</button>
+    </div>
+  </div>
+</div>
 <div class="modal" id="installProgressModal">
   <div class="modal-box" style="min-width:420px">
     <h3 id="ipTitle">Installing...</h3>
@@ -576,14 +659,15 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $(`page-${name}`).classList.add('active');
   if (name === 'console') setupConsole();
-  if (name === 'files') loadFileTree();
-  if (name === 'backups') loadBackups();
-  if (name === 'dashboard') loadDashboard();
-  if (name === 'properties') loadProperties();
-  if (name === 'servers') loadServers();
-  if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
-  if (name === 'tunnel') loadTunnel();
-  else stopTunnelPoll();
+  else if (name === 'files') loadFileTree();
+  else if (name === 'backups') loadBackups();
+  else if (name === 'dashboard') loadDashboard();
+  else if (name === 'properties') loadProperties();
+  else if (name === 'servers') loadServers();
+  else if (name === 'packs') { loadInstalledPacks(); if (!window._packsLoaded) { window._packsLoaded = true; searchPacks(true); } }
+  else if (name === 'players') loadPlayers();
+  else if (name === 'tunnel') loadTunnel();
+  if (name !== 'tunnel') stopTunnelPoll();
 }
 
 // ── Toast ──
@@ -2005,6 +2089,211 @@ function copyDaemonLogs() {
     ta.remove();
     toast('Logs copied!', 'success');
   });
+}
+
+// ── Players Tab ──
+let _allPlayers = [];
+let _filteredPlayers = [];
+let _playerPoll = null;
+
+function showAddPlayerModal() {
+  $('apName').value = '';
+  $('addPlayerModal').classList.add('show');
+  setTimeout(() => $('apName').focus(), 100);
+}
+
+async function doAddPlayer() {
+  const name = $('apName').value.trim();
+  if (!name) { toast('Enter a player name', 'error'); return; }
+  const alsoWhitelist = $('apAlsoWhitelist').value === 'yes';
+  closeModal('addPlayerModal');
+
+  // Try to add via whitelist command
+  if (alsoWhitelist) {
+    await sendPlayerCommand('whitelist add', name);
+  } else {
+    await sendPlayerCommand('whitelist add', name);
+  }
+
+  toast(`Player "${name}" added` + (alsoWhitelist ? ' and whitelisted' : ''), 'success');
+  loadPlayers();
+}
+
+async function sendPlayerCommand(cmd, name) {
+  if (!_currentServer) { toast('Select a server first', 'error'); return null; }
+  try {
+    const r = await fetch(`/api/servers/${_currentServer}/players/send`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command: cmd, name})
+    });
+    const d = await r.json();
+    if (!d.ok && !d.offline) toast(d.error || 'Command failed', 'error');
+    return d;
+  } catch(e) {
+    toast('Network error', 'error');
+    return null;
+  }
+}
+
+async function loadPlayers() {
+  const container = $('playersContent');
+  if (!_currentServer) {
+    container.innerHTML = '<div class="search-status" style="padding:40px;font-size:16px">Select a server to manage players.</div>';
+    return;
+  }
+  try {
+    const d = await get('/api/players');
+    if (!d.ok) { container.innerHTML = `<div class="search-status">${d.error || 'Failed to load players'}</div>`; return; }
+    _allPlayers = d.players || [];
+    $('playerSearchInput').value = '';
+    renderPlayersTable();
+    startPlayerPoll();
+  } catch(e) {
+    container.innerHTML = '<div class="search-status">Failed to load players.</div>';
+  }
+}
+
+function startPlayerPoll() {
+  stopPlayerPoll();
+  _playerPoll = setInterval(async () => {
+    if (!$('page-players').classList.contains('active')) { stopPlayerPoll(); return; }
+    try {
+      const d = await get('/api/players');
+      if (d.ok) { _allPlayers = d.players || []; renderPlayersTable(); }
+    } catch(e) {}
+  }, 5000);
+}
+
+function stopPlayerPoll() {
+  if (_playerPoll) { clearInterval(_playerPoll); _playerPoll = null; }
+}
+
+function filterPlayersList() {
+  renderPlayersTable();
+}
+
+function renderPlayersTable() {
+  const container = $('playersContent');
+  const q = $('playerSearchInput').value.toLowerCase().trim();
+  let players = _allPlayers;
+  if (q) players = players.filter(p => p.name.toLowerCase().includes(q));
+
+  const online = players.filter(p => p.online);
+  const whitelisted = players.filter(p => p.whitelisted);
+  const ops = players.filter(p => p.op);
+  const banned = players.filter(p => p.banned);
+
+  let html = '<div class="players-stats">';
+  html += `<div class="ps-card"><div class="ps-val" style="color:#69f0ae">${online.length}</div><div class="ps-label">Online</div></div>`;
+  html += `<div class="ps-card"><div class="ps-val" style="color:#64b5f6">${whitelisted.length}</div><div class="ps-label">Whitelisted</div></div>`;
+  html += `<div class="ps-card"><div class="ps-val" style="color:#5ced73">${ops.length}</div><div class="ps-label">Operators</div></div>`;
+  html += `<div class="ps-card"><div class="ps-val" style="color:#ff4444">${banned.length}</div><div class="ps-label">Banned</div></div>`;
+  html += `<div class="ps-card"><div class="ps-val" style="color:#b388ff">${players.length}</div><div class="ps-label">Total</div></div>`;
+  html += '</div>';
+
+  if (!players.length) {
+    html += '<div class="player-empty">' +
+      (q ? 'No players matching "' + escapeHtml(q) + '"' : 'No players found yet. Players appear once they join the server or are added to the whitelist.') +
+      '</div>';
+    container.innerHTML = html;
+    return;
+  }
+
+  html += '<div class="players-table-wrap">';
+  html += '<div class="players-summary">';
+  html += `<span class="ps-green">${online.length} online</span>`;
+  html += `<span>&middot; ${players.length} player${players.length!==1?'s':''} total</span>`;
+  if (q) html += `<span>&middot; filtered by "${escapeHtml(q)}"</span>`;
+  html += '</div>';
+  html += '<table class="players-table">';
+  html += '<thead><tr>';
+  html += '<th>Player</th>';
+  html += '<th class="hide-mobile">Status</th>';
+  html += '<th>Roles</th>';
+  html += '<th>Actions</th>';
+  html += '</tr></thead><tbody>';
+
+  // Sort: online first, then alphabetically
+  players.sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const p of players) {
+    const statusCls = p.online ? 'player-online' : 'player-offline';
+    const statusTxt = p.online ? '&#x25cf; Online' : '&#x25cb; Offline';
+    let badges = '';
+    if (p.op) badges += '<span class="player-badge op">OP</span>';
+    if (p.whitelisted) badges += '<span class="player-badge whitelisted">Whitelisted</span>';
+    if (p.banned) badges += '<span class="player-badge banned">Banned</span>';
+    if (p.online) badges += '<span class="player-badge online-badge">Online</span>';
+
+    let actions = '<div class="player-actions">';
+    if (p.online) {
+      actions += `<button class="btn btn-kick" onclick="doPlayerAction('kick','${p.name}')">Kick</button>`;
+    }
+    if (!p.op) {
+      actions += `<button class="btn btn-op" onclick="doPlayerAction('op','${p.name}')">OP</button>`;
+    } else {
+      actions += `<button class="btn btn-deop" onclick="doPlayerAction('deop','${p.name}')">DeOp</button>`;
+    }
+    if (!p.whitelisted) {
+      actions += `<button class="btn btn-whitelist" onclick="doPlayerAction('whitelist add','${p.name}')">Whitelist</button>`;
+    } else {
+      actions += `<button class="btn btn-unwhitelist" onclick="doPlayerAction('whitelist remove','${p.name}')">Unwhitelist</button>`;
+    }
+    if (!p.banned) {
+      actions += `<button class="btn btn-ban" onclick="doPlayerAction('ban','${p.name}')">Ban</button>`;
+    } else {
+      actions += `<button class="btn btn-unban" onclick="doPlayerAction('pardon','${p.name}')">Unban</button>`;
+    }
+    actions += '</div>';
+
+    const uuidHtml = p.uuid ? `<span class="player-uuid hide-mobile">${p.uuid.substring(0,8)}</span>` : '';
+    html += `<tr>
+      <td><span class="player-name">${escapeHtml(p.name)}</span>${uuidHtml}</td>
+      <td class="hide-mobile"><span class="${statusCls}">${statusTxt}</span></td>
+      <td>${badges || '<span style="color:#555;font-size:11px">Member</span>'}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+}
+
+async function doPlayerAction(cmd, name) {
+  const actionLabels = {
+    'whitelist add': 'Whitelist',
+    'whitelist remove': 'Unwhitelist',
+    'ban': 'Ban',
+    'pardon': 'Unban',
+    'op': 'OP',
+    'deop': 'DeOp',
+    'kick': 'Kick'
+  };
+  const label = actionLabels[cmd] || cmd;
+  // Confirm for destructive actions
+  if (cmd === 'ban') {
+    if (!confirm(`Ban "${name}"? They will be kicked and unable to rejoin.`)) return;
+  }
+  if (cmd === 'whitelist remove') {
+    if (!confirm(`Remove "${name}" from whitelist? They won't be able to join if whitelist is enabled.`)) return;
+  }
+  if (cmd === 'kick') {
+    if (!confirm(`Kick "${name}" from the server?`)) return;
+  }
+
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
+  const d = await sendPlayerCommand(cmd, name);
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  if (d && (d.ok || d.offline)) {
+    toast(`"${name}" successfully ${cmd === 'whitelist add' ? 'whitelisted' : cmd === 'whitelist remove' ? 'unwhitelisted' : cmd === 'pardon' ? 'unbanned' : label.toLowerCase() + (cmd !== 'kick' ? 'ed' : '')}`, 'success');
+    loadPlayers();
+  }
 }
 
 // ── Utility ──

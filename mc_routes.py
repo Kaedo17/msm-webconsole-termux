@@ -447,6 +447,109 @@ def register_routes(app, html):
         return ok({"message": f"Restored from {data.get('file')}."})
 
     # ═══════════════════════════════════════════════════════════════════
+    #  PLAYER MANAGEMENT — per-server
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _read_player_file(inst, filename):
+        """Read a Minecraft JSON player file, return list of dicts or []. Handles missing/invalid files."""
+        path = inst.dir / filename
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text())
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, Exception):
+            return []
+
+    def _build_player_list(inst):
+        """Merge usercache, whitelist, bans, ops into a unified player list."""
+        usercache = _read_player_file(inst, "usercache.json")
+        whitelist = _read_player_file(inst, "whitelist.json")
+        banned = _read_player_file(inst, "banned-players.json")
+        ops = _read_player_file(inst, "ops.json")
+
+        whitelisted_names = {p.get("name", "").lower() for p in whitelist}
+        banned_names = {p.get("name", "").lower() for p in banned}
+        op_names = {p.get("name", "").lower() for p in ops}
+
+        online_players = list(inst.status_cache.get("players", []))
+        online_set = {p.lower() for p in online_players}
+
+        seen = set()
+        players = []
+        # Seed from usercache
+        for entry in usercache:
+            name = entry.get("name", "")
+            uuid = entry.get("uuid", "")
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            players.append({
+                "name": name,
+                "uuid": uuid,
+                "online": name.lower() in online_set,
+                "whitelisted": name.lower() in whitelisted_names,
+                "banned": name.lower() in banned_names,
+                "op": name.lower() in op_names,
+            })
+        # Also add online players not in usercache
+        for name in online_players:
+            if name.lower() not in seen:
+                seen.add(name.lower())
+                players.append({
+                    "name": name,
+                    "uuid": "",
+                    "online": True,
+                    "whitelisted": name.lower() in whitelisted_names,
+                    "banned": name.lower() in banned_names,
+                    "op": name.lower() in op_names,
+                })
+        # Add whitelisted/banned/opped players not in usercache
+        for name_set, flag in [(whitelisted_names, "whitelisted"),
+                                (banned_names, "banned"), (op_names, "op")]:
+            for name_lower in name_set:
+                if name_lower not in seen:
+                    seen.add(name_lower)
+                    players.append({
+                        "name": name_lower,
+                        "uuid": "",
+                        "online": name_lower in online_set,
+                        "whitelisted": flag == "whitelisted" or name_lower in whitelisted_names,
+                        "banned": flag == "banned" or name_lower in banned_names,
+                        "op": flag == "op" or name_lower in op_names,
+                    })
+        return players
+
+    @app.route("/api/servers/<sid>/players")
+    def api_players_list(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        players = _build_player_list(inst)
+        return ok({"players": players, "online_count": len([p for p in players if p["online"]])})
+
+    @app.route("/api/servers/<sid>/players/send", methods=["POST"])
+    def api_players_send(sid):
+        """Generic endpoint to run a command for player management (whitelist, ban, etc.)."""
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        data = parse_json_body()
+        cmd = data.get("command", "").strip()
+        name = data.get("name", "").strip()
+        if not cmd:
+            return fail("No command provided.")
+        if name:
+            full_cmd = f"{cmd} {name}"
+        else:
+            full_cmd = cmd
+        if not inst.is_running():
+            # If server is off, we can still modify JSON files directly
+            return ok({"message": f"Server is offline. Use console commands or edit files directly.", "offline": True})
+        ok_, msg = send_server(inst, full_cmd)
+        return ok({"message": msg}) if ok_ else fail(msg)
+
+    # ═══════════════════════════════════════════════════════════════════
     #  PROPERTIES EDITOR — per-server
     # ═══════════════════════════════════════════════════════════════════
 
