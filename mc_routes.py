@@ -493,9 +493,10 @@ def register_routes(app, html):
         banned = _read_player_file(inst, "banned-players.json")
         ops = _read_player_file(inst, "ops.json")
 
-        whitelisted_names = {p.get("name", "").lower() for p in whitelist}
-        banned_names = {p.get("name", "").lower() for p in banned}
-        op_names = {p.get("name", "").lower() for p in ops}
+        # Preserve original casing: lowercase -> original name
+        whitelist_map = {p.get("name", "").lower(): p.get("name", "") for p in whitelist}
+        banned_map = {p.get("name", "").lower(): p.get("name", "") for p in banned}
+        ops_map = {p.get("name", "").lower(): p.get("name", "") for p in ops}
 
         online_players = list(inst.status_cache.get("players", []))
         online_set = {p.lower() for p in online_players}
@@ -513,9 +514,9 @@ def register_routes(app, html):
                 "name": name,
                 "uuid": uuid,
                 "online": name.lower() in online_set,
-                "whitelisted": name.lower() in whitelisted_names,
-                "banned": name.lower() in banned_names,
-                "op": name.lower() in op_names,
+                "whitelisted": name.lower() in whitelist_map,
+                "banned": name.lower() in banned_map,
+                "op": name.lower() in ops_map,
             })
         # Also add online players not in usercache
         for name in online_players:
@@ -525,23 +526,23 @@ def register_routes(app, html):
                     "name": name,
                     "uuid": "",
                     "online": True,
-                    "whitelisted": name.lower() in whitelisted_names,
-                    "banned": name.lower() in banned_names,
-                    "op": name.lower() in op_names,
+                    "whitelisted": name.lower() in whitelist_map,
+                    "banned": name.lower() in banned_map,
+                    "op": name.lower() in ops_map,
                 })
-        # Add whitelisted/banned/opped players not in usercache
-        for name_set, flag in [(whitelisted_names, "whitelisted"),
-                                (banned_names, "banned"), (op_names, "op")]:
-            for name_lower in name_set:
+        # Add whitelisted/banned/opped players not yet in the list
+        for name_map, flag in [(whitelist_map, "whitelisted"),
+                                (banned_map, "banned"), (ops_map, "op")]:
+            for name_lower, original_name in name_map.items():
                 if name_lower not in seen:
                     seen.add(name_lower)
                     players.append({
-                        "name": name_lower,
+                        "name": original_name,
                         "uuid": "",
                         "online": name_lower in online_set,
-                        "whitelisted": flag == "whitelisted" or name_lower in whitelisted_names,
-                        "banned": flag == "banned" or name_lower in banned_names,
-                        "op": flag == "op" or name_lower in op_names,
+                        "whitelisted": name_lower in whitelist_map,
+                        "banned": name_lower in banned_map,
+                        "op": name_lower in ops_map,
                     })
         return players
 
