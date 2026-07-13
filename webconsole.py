@@ -1255,11 +1255,18 @@ function renderVersions() {
     const loaders = (v.loaders||[]).join(', ');
     for (const f of (v.files||[]).slice(0,1)) {
       const size = f.size >= 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(0)+' KB';
-      html += `<div style="padding:10px;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;background:#151515">
+      let cardHtml = `<div style="padding:10px;border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;background:#151515">
         <div style="font-size:13px"><strong>${escapeHtml(v.name)}</strong> <span style="color:#888">${v.version_number}</span></div>
         <div style="font-size:12px;color:#666;margin:4px 0">${gameVer} | ${loaders} | ${size}</div>
-        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="installPack('${f.url}','${f.filename}','${_versionPackType}')">Download</button>
-      </div>`;
+        <button class="btn btn-start" style="padding:4px 12px;font-size:12px" onclick="installPack('${f.url}','${f.filename}','${_versionPackType}')">Download</button>`;
+      // Show Server Pack download button if available
+      if (v.alt_file) {
+        const alt = v.alt_file;
+        const altSize = alt.size >= 1048576 ? (alt.size/1048576).toFixed(1)+' MB' : (alt.size/1024).toFixed(0)+' KB';
+        cardHtml += ` <button class="btn btn-restart" style="padding:4px 12px;font-size:12px" onclick="installPack('${alt.url}','${alt.filename}','${_versionPackType}')">📦 Server Pack (${altSize})</button>`;
+      }
+      cardHtml += `</div>`;
+      html += cardHtml;
     }
   }
   html += '</div>';

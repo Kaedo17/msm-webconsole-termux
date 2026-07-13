@@ -253,7 +253,7 @@ def curseforge_versions(project_id, project_type="mod", limit=20):
 
 
 def _api_versions(project_id, limit):
-    """Fetch files via API proxy."""
+    """Fetch files via API proxy, including server packs linked via alternateFileId."""
     try:
         path = f"/mods/{project_id}/files?pageSize={limit}"
         data = _api_get(path)
@@ -269,7 +269,7 @@ def _api_versions(project_id, limit):
                 "size": f_item.get("fileLength", 0),
             }
 
-            versions.append({
+            version = {
                 "id": str(f_item.get("id", "")),
                 "name": f_item.get("displayName", f_item.get("fileName", "")),
                 "version_number": f_item.get("fileName", f"file-{f_item.get('id', '')}"),
@@ -277,7 +277,28 @@ def _api_versions(project_id, limit):
                 "loaders": loaders,
                 "files": [file_entry],
                 "date": f_item.get("fileDate", ""),
-            })
+                "alt_file": None,
+            }
+
+            # If this file has an alternate file (server pack), fetch its details
+            alt_id = f_item.get("alternateFileId", 0)
+            if alt_id:
+                try:
+                    alt_path = f"/mods/{project_id}/files/{alt_id}"
+                    alt_data = _api_get(alt_path)
+                    alt_item = alt_data.get("data", {})
+                    if alt_item.get("downloadUrl"):
+                        version["alt_file"] = {
+                            "url": alt_item["downloadUrl"],
+                            "filename": alt_item.get("fileName", f"server-pack-{alt_id}.zip"),
+                            "size": alt_item.get("fileLength", 0),
+                            "id": str(alt_id),
+                            "display_name": alt_item.get("displayName", "Server Pack"),
+                        }
+                except Exception:
+                    pass  # Server pack unavailable, skip silently
+
+            versions.append(version)
 
         return versions
     except Exception:
