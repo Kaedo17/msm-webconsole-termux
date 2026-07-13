@@ -562,14 +562,27 @@ def register_routes(app, html):
         except Exception:
             return False
 
+    def _offline_uuid(name):
+        """Generate the standard offline-mode UUID for a player name.
+
+        Minecraft's offline UUID = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes())
+        which is MD5 hash formatted as a version-3 UUID.
+        """
+        import hashlib
+        import uuid
+        md5 = hashlib.md5(f"OfflinePlayer:{name}".encode("utf-8")).digest()
+        md5_arr = bytearray(md5)
+        md5_arr[6] = (md5_arr[6] & 0x0f) | 0x30   # version 3
+        md5_arr[8] = (md5_arr[8] & 0x3f) | 0x80   # RFC 4122 variant
+        return str(uuid.UUID(bytes=bytes(md5_arr)))
+
     def _add_whitelist_entry(inst, name):
         entries = _read_player_file(inst, "whitelist.json")
         # Check if already there
         if any(e.get("name", "").lower() == name.lower() for e in entries):
             return False, f"{name} is already whitelisted."
-        import uuid as _uuid
-        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
-        entries.append({"uuid": fake_uuid, "name": name})
+        offline_uuid = _offline_uuid(name)
+        entries.append({"uuid": offline_uuid, "name": name})
         if _write_player_file(inst, "whitelist.json", entries):
             return True, f"{name} added to whitelist."
         return False, "Failed to write whitelist.json."
@@ -615,9 +628,8 @@ def register_routes(app, html):
         entries = _read_player_file(inst, "ops.json")
         if any(e.get("name", "").lower() == name.lower() for e in entries):
             return False, f"{name} is already an operator."
-        import uuid as _uuid
-        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
-        entries.append({"uuid": fake_uuid, "name": name, "level": 4})
+        offline_uuid = _offline_uuid(name)
+        entries.append({"uuid": offline_uuid, "name": name, "level": 4})
         if _write_player_file(inst, "ops.json", entries):
             return True, f"{name} opped."
         return False, "Failed to write ops.json."
@@ -636,9 +648,8 @@ def register_routes(app, html):
         entries = _read_player_file(inst, "usercache.json")
         if any(e.get("name", "").lower() == name.lower() for e in entries):
             return False, f"{name} already in known players."
-        import uuid as _uuid
-        fake_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"minecraft:{name}"))
-        entries.append({"uuid": fake_uuid, "name": name})
+        offline_uuid = _offline_uuid(name)
+        entries.append({"uuid": offline_uuid, "name": name})
         if _write_player_file(inst, "usercache.json", entries):
             return True, f"{name} added to known players."
         return False, "Failed to write usercache.json."
