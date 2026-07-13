@@ -130,9 +130,23 @@ def _ensure_properties(inst):
         )
 
 
+def _get_java_bin(inst):
+    """Select the Java binary for this server instance.
+
+    Priority:
+    1. inst.java_bin (user override, if set)
+    2. Auto-detect from inst.mc_version
+    3. Global JAVA_BIN fallback
+    """
+    if inst.java_bin:
+        return str(inst.java_bin)
+    return mc_state.select_java_for_version(inst.mc_version)
+
+
 def _make_java_cmd(inst, jar):
+    java_bin = _get_java_bin(inst)
     return [
-        str(mc_state.JAVA_BIN),
+        java_bin,
         f"-Xms{inst.min_ram}", f"-Xmx{inst.max_ram}",
         "-Djline.terminal=jline.UnsupportedTerminal",
         "-jar", str(jar), "--nogui",
@@ -156,9 +170,10 @@ def _find_forge_args_file(server_dir):
 
 def _make_forge_cmd(inst, args_file):
     """Build Java command for modern Forge (1.18+) using @arg files."""
+    java_bin = _get_java_bin(inst)
     rel = str(args_file.relative_to(inst.dir))
     return [
-        str(mc_state.JAVA_BIN),
+        java_bin,
         f"-Xms{inst.min_ram}", f"-Xmx{inst.max_ram}",
         f"@user_jvm_args.txt",
         f"@{rel}",

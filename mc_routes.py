@@ -64,7 +64,8 @@ def register_routes(app, html):
         mx = data.get("max_ram", "2G").strip().upper()
         if not re.match(r"^\d+[MG]$", mr) or not re.match(r"^\d+[MG]$", mx):
             return fail("Invalid RAM format.")
-        inst = mci.create_server(name, jt, mr, mx)
+        mc_ver = data.get("mc_version", "") or mc_downloads.get_latest_minecraft_version()
+        inst = mci.create_server(name, jt, mr, mx, mc_version=mc_ver)
         if data.get("eula"):
             (inst.dir / "eula.txt").write_text("eula=true\n")
         seed = data.get("level_seed", "")
@@ -74,7 +75,6 @@ def register_routes(app, html):
                 save_props(inst.dir, {"level-seed": seed})
             else:
                 props_path.write_text(f"level-seed={seed}\n")
-        mc_ver = data.get("mc_version", "") or mc_downloads.get_latest_minecraft_version()
         if mc_ver:
             forge_ver = data.get("forge_version", "")
             ok_, msg = mc_downloads.download_server_jar(inst.dir, jt, mc_ver, forge_ver)

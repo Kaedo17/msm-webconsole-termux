@@ -1116,6 +1116,7 @@ async function loadDashboard() {
       <div class="stat-card"><div class="sc-label">Status</div><div class="sc-val" id="dashStatus" style="color:${d.online?'#5ced73':'#ff4444'}">${d.online?'Running':'Stopped'}</div></div>
       <div class="stat-card"><div class="sc-label">Players</div><div class="sc-val" id="dashPlayers" style="color:#b388ff">${d.online_count} / ${d.max_players}</div></div>
       <div class="stat-card"><div class="sc-label">Memory</div><div class="sc-val" id="dashMem" style="color:#5ced73">${d.mem_mb||'—'} MB</div></div>
+      <div class="stat-card"><div class="sc-label">Java</div><div class="sc-val" id="dashJava" style="font-size:14px;color:#fdd835">${d.java_version||'Java (default)'}</div></div>
       <div class="stat-card"><div class="sc-label">Uptime</div><div class="sc-val" id="dashUptime" style="color:#64b5f6;font-size:18px">—</div></div>
       <div class="stat-card"><div class="sc-label">Address</div><div class="sc-val" id="dashAddr" style="font-size:14px;color:#64b5f6">${d.local_ip||'—'}:${d.server_port||'25565'}</div></div>
       <div class="stat-card"><div class="sc-label">Tunnel</div><div class="sc-val" id="dashTunnel" style="font-size:14px;color:#888">—</div></div>
@@ -1129,6 +1130,7 @@ async function loadDashboard() {
       <h3 style="margin-bottom:8px;font-size:14px;color:#888;text-transform:uppercase">Server Info</h3>
       <table style="width:100%;font-size:13px;border-collapse:collapse">
         <tr><td style="padding:6px 0;color:#888">Jar</td><td style="padding:6px 0">${d.jar||'—'}</td></tr>
+        <tr><td style="padding:6px 0;color:#888">Java</td><td style="padding:6px 0"><span style="color:#fdd835">${d.java_version||'Java (default)'}</span></td></tr>
         <tr><td style="padding:6px 0;color:#888">Directory</td><td style="padding:6px 0">${d.server_dir}</td></tr>
         <tr><td style="padding:6px 0;color:#888">Players</td><td style="padding:6px 0">${d.players.length ? d.players.join(', ') : 'None'}</td></tr>
       </table>

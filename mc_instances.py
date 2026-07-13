@@ -23,7 +23,8 @@ CONSOLE_MAX = 500
 
 class ServerInstance:
     def __init__(self, sid, name, server_dir, jar_type="vanilla",
-                 min_ram="512M", max_ram="2G", port=25565):
+                 min_ram="512M", max_ram="2G", port=25565,
+                 mc_version="", java_bin=""):
         self.id = sid
         self.name = name
         self.dir = Path(server_dir)
@@ -31,6 +32,8 @@ class ServerInstance:
         self.min_ram = min_ram
         self.max_ram = max_ram
         self.port = port
+        self.mc_version = mc_version
+        self.java_bin = java_bin
 
         self.proc = None
         self.console_history = []
@@ -60,6 +63,7 @@ class ServerInstance:
             "max_ram": self.max_ram,
             "port": self.port,
             "online": self.is_running(),
+            "mc_version": self.mc_version,
         }
 
     def status_dict(self):
@@ -69,6 +73,13 @@ class ServerInstance:
         for f in sorted(self.dir.glob("*.jar")):
             jar = f.name
             break
+        import mc_state
+        if self.java_bin:
+            java_ver = mc_state.get_java_label(self.java_bin)
+        elif self.mc_version:
+            java_ver = mc_state.get_java_label_for_version(self.mc_version)
+        else:
+            java_ver = mc_state.get_java_label(mc_state.JAVA_BIN)
         return {
             "id": self.id,
             "name": self.name,
@@ -85,6 +96,8 @@ class ServerInstance:
             "max_ram": self.max_ram,
             "port": self.port,
             "jar_type": self.jar_type,
+            "mc_version": self.mc_version,
+            "java_version": java_ver,
         }
 
     def save_config(self):
@@ -100,6 +113,8 @@ class ServerInstance:
         existing["max_ram"] = self.max_ram
         existing["jar_type"] = self.jar_type
         existing["port"] = self.port
+        existing["mc_version"] = self.mc_version
+        existing["java_bin"] = self.java_bin
         cfg.write_text(json.dumps(existing, indent=2))
 
     def load_config(self):
@@ -111,6 +126,8 @@ class ServerInstance:
                 self.max_ram = data.get("max_ram", self.max_ram)
                 self.jar_type = data.get("jar_type", self.jar_type)
                 self.port = data.get("port", self.port)
+                self.mc_version = data.get("mc_version", self.mc_version)
+                self.java_bin = data.get("java_bin", self.java_bin)
             except Exception:
                 pass
 
@@ -162,7 +179,8 @@ def create_server(name, jar_type="vanilla", min_ram="512M", max_ram="2G",
     server_dir.mkdir(parents=True, exist_ok=True)
     if port is None:
         port = _next_available_port()
-    inst = ServerInstance(sid, name, server_dir, jar_type, min_ram, max_ram, port)
+    inst = ServerInstance(sid, name, server_dir, jar_type, min_ram, max_ram, port,
+                          mc_version=mc_version or "")
     inst.save_config()
     props = server_dir / "server.properties"
     if not props.exists():
@@ -244,6 +262,7 @@ def _save_registry():
             "id": d["id"], "name": d["name"], "dir": d["dir"],
             "jar_type": d["jar_type"], "min_ram": s.min_ram,
             "max_ram": s.max_ram, "port": s.port,
+            "mc_version": s.mc_version,
         })
     try:
         REGISTRY_PATH.write_text(json.dumps(data, indent=2))
@@ -269,6 +288,7 @@ def load_registry():
                     item.get("min_ram", "512M"),
                     item.get("max_ram", "2G"),
                     item.get("port", 25565),
+                    item.get("mc_version", ""),
                 )
                 inst.load_config()
                 with _registry_lock:
