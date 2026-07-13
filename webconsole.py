@@ -608,7 +608,7 @@ async function api(method, body) {
 }
 
 async function get(path) {
-  const globalPaths = ['/api/servers', '/api/versions', '/api/playit', '/api/config'];
+  const globalPaths = ['/api/servers', '/api/versions', '/api/playit'];
   const isGlobal = globalPaths.some(p => path.startsWith(p));
   if (path.startsWith('/api/') && !isGlobal && _currentServer) {
     path = `/api/servers/${_currentServer}/${path.replace('/api/', '')}`;
@@ -1083,7 +1083,7 @@ async function saveRam() {
 // ── Properties / Settings ──
 async function loadProperties() {
   // Load app config (always works)
-  let cfgRes = await get('/api/config').catch(() => ({ok: false}));
+  let cfgRes = await fetch('/api/config').then(r => r.json()).catch(() => ({ok: false}));
 
   // Try to load server properties (may fail if no server selected)
   let propsRes = await get('/api/properties').catch(() => ({ok: false, error: 'Select a server first'}));
