@@ -1622,20 +1622,30 @@ function appendConsoleLine(out, line) {
 }
 
 function clearConsole() {
-  $('consoleOutput').innerHTML = '';
+  const el = $('consoleOutput');
+  if (!el) return;
+  el.innerHTML = '';
+  toast('Console cleared', 'success');
 }
 
 function copyConsoleLogs() {
-  const lines = Array.from($('consoleOutput').children).map(el => el.textContent.trim()).filter(Boolean).join('\n');
+  const el = $('consoleOutput');
+  if (!el) { toast('Console not found', 'error'); return; }
+  const lines = Array.from(el.children).map(c => c.textContent.trim()).filter(Boolean).join('\n');
   if (!lines) { toast('No console output to copy', 'info'); return; }
-  navigator.clipboard.writeText(lines).then(() => toast('Console logs copied!', 'success')).catch(() => {
+  navigator.clipboard.writeText(lines).then(() => {
+    toast(`Copied ${lines.split('\n').length} lines`, 'success');
+  }).catch(() => {
+    // Fallback for non-HTTPS or restricted contexts
     const ta = document.createElement('textarea');
     ta.value = lines;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand('copy');
+    try { document.execCommand('copy'); toast('Console logs copied!', 'success'); }
+    catch (e) { toast('Failed to copy. Select text manually.', 'error'); }
     ta.remove();
-    toast('Console logs copied!', 'success');
   });
 }
 
