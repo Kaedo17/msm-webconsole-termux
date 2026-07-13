@@ -608,7 +608,7 @@ async function api(method, body) {
 }
 
 async function get(path) {
-  const globalPaths = ['/api/servers', '/api/versions', '/api/playit'];
+  const globalPaths = ['/api/servers', '/api/versions', '/api/playit', '/api/config'];
   const isGlobal = globalPaths.some(p => path.startsWith(p));
   if (path.startsWith('/api/') && !isGlobal && _currentServer) {
     path = `/api/servers/${_currentServer}/${path.replace('/api/', '')}`;
@@ -1082,11 +1082,11 @@ async function saveRam() {
 
 // ── Properties / Settings ──
 async function loadProperties() {
-  // Load both server properties and app config in parallel
-  const [propsRes, cfgRes] = await Promise.all([
-    get('/api/properties'),
-    get('/api/config'),
-  ]);
+  // Load app config (always works)
+  let cfgRes = await get('/api/config').catch(() => ({ok: false}));
+
+  // Try to load server properties (may fail if no server selected)
+  let propsRes = await get('/api/properties').catch(() => ({ok: false, error: 'Select a server first'}));
 
   // Build the API key section (global webconsole setting)
   let topHtml = `<div id="propsBanner"></div>`;
@@ -1109,9 +1109,10 @@ async function loadProperties() {
     <div id="cfApiKeyStatus" style="font-size:12px;margin-top:6px;color:#888">${hasKey ? '✅ Key is configured' : 'No key set — using community proxy'}</div>
   </div>`;
 
-  // Render server properties
+  // Render server properties (or show message if no server)
   if (!propsRes.ok) {
     $('page-properties').innerHTML = topHtml + `<div class="search-status">${propsRes.error}</div>`;
+    window._propChanges = {};
     return;
   }
   const props = propsRes.properties || [];
