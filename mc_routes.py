@@ -565,6 +565,7 @@ def register_routes(app, html):
                         extracted = []
                         mods_downloaded = 0
                         mods_failed = 0
+                        total_mods = 0
                         mods_dir = inst.dir / "mods"
                         mods_dir.mkdir(exist_ok=True)
                         update_progress(tid, status="running", phase="extracting", message="Extracting overrides...")
