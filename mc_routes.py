@@ -622,7 +622,11 @@ def register_routes(app, html):
                                     _dl_lock = _thr.Lock()
                                     cf_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                              "AppleWebKit/537.36")
-                                    cf_api = "https://api.curse.tools/v1/cf"
+
+                                    # Use official API with key if available, else proxy
+                                    cf_key = mc_state.get_cf_api_key()
+                                    cf_api = ("https://api.curseforge.com/v1" if cf_key
+                                              else "https://api.curse.tools/v1/cf")
 
                                     def _dl_one(mf):
                                         pid = mf.get("projectID")
@@ -632,13 +636,16 @@ def register_routes(app, html):
                                         fn = None
                                         try:
                                             url = f"{cf_api}/mods/{pid}/files/{fid}"
-                                            req = urllib.request.Request(url, headers={"User-Agent": cf_ua})
+                                            headers = {"User-Agent": cf_ua}
+                                            if cf_key:
+                                                headers["x-api-key"] = cf_key
+                                            req = urllib.request.Request(url, headers=headers)
                                             resp = urllib.request.urlopen(req, timeout=15)
                                             fd = json.loads(resp.read()).get("data", {})
                                             du = fd.get("downloadUrl", "")
                                             fn = fd.get("fileName", f"{pid}-{fid}.jar")
                                             if du and ".jar" in fn.lower():
-                                                dq = urllib.request.Request(du, headers={"User-Agent": cf_ua})
+                                                dq = urllib.request.Request(du, headers=headers)
                                                 dr = urllib.request.urlopen(dq, timeout=45)
                                                 jp = mods_dir / fn
                                                 jp.parent.mkdir(parents=True, exist_ok=True)
@@ -673,7 +680,8 @@ def register_routes(app, html):
                         if dest.exists():
                             dest.rename(modpacks_ref)
 
-                        msg = f"Installed modpack ({len(extracted)} overrides, {mods_downloaded} mods"
+                        msg = (f"Installed modpack ({len(extracted)} overrides, "
+                               f"{mods_downloaded}/{total_mods} mods")
                         if mods_failed:
                             msg += f", {mods_failed} failed"
                         msg += ")"
@@ -801,3 +809,29 @@ def register_routes(app, html):
         if "already claimed" in out.lower() or "agent" in out.lower():
             result["claimed"] = True
         return ok(result)
+
+    @app.route("/api/config")
+    def api_config_get():
+        """Return the current webconsole config (no secrets by default)."""
+        cfg = mc_state.load_config()
+        return ok({
+            "has_cf_api_key": bool(cfg.get("curseforge_api_key", "")),
+            "curseforge_api_key": cfg.get("curseforge_api_key", ""),
+        })
+
+    @app.route("/api/config", methods=["PUT"])
+    def api_config_put():
+        """Update webconsole config fields."""
+        data = parse_json_body()
+        if not data:
+            return fail("No data provided.")
+        allowed = {"curseforge_api_key"}
+        changes = {k: v for k, v in data.items() if k in allowed}
+        if not changes:
+            return fail("No valid fields to update.")
+        cfg = mc_state.load_config()
+        cfg.update(changes)
+        if mc_state.save_config(cfg):
+            mc_state.clear_config_cache()
+            return ok({"message": "Settings saved."})
+        return fail("Failed to save config.")

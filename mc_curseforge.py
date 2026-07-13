@@ -1,27 +1,33 @@
-"""CurseForge integration via public API proxy (like Prism Launcher).
+"""CurseForge integration via official API or community proxy.
 
-Uses api.curse.tools — a community proxy that mirrors the official
-CurseForge API without requiring an API key. Falls back to optimized
-HTML scraping if the proxy is unavailable.
+Uses the official CurseForge API (https://api.curseforge.com/v1) when an
+API key is configured via the webconsole Settings UI. Falls back to the
+community proxy (api.curse.tools) if no key is set.
 
 Official CurseForge API reference:
   https://docs.curseforge.com/rest-api/
 
-The proxy mirrors the official API at:
+The community proxy mirrors the official API at:
   https://api.curse.tools/v1/cf/
 """
 
 import json
+import os
 import re
 import time
 import urllib.parse
 import urllib.request
 
+import mc_state
+
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-# API proxy base — mirrors official CurseForge API without API key
-CF_API = "https://api.curse.tools/v1/cf"
+# CurseForge API endpoints
+# Official API requires an API key (set via the Settings UI).
+# The community proxy (curse.tools) works without a key but may be less reliable.
+CF_API_OFFICIAL = "https://api.curseforge.com/v1"
+CF_API_PROXY = "https://api.curse.tools/v1/cf"
 CF_BASE = "https://www.curseforge.com"
 GAME_ID = 432  # Minecraft
 
@@ -61,10 +67,25 @@ def _set_cache(key, value):
 
 # ── HTTP helpers ─────────────────────────────────────────────────────
 
+def _get_api_base():
+    """Return the API base URL and auth headers based on whether a key is configured."""
+    api_key = mc_state.get_cf_api_key()
+    if api_key:
+        return CF_API_OFFICIAL, {"x-api-key": api_key}
+    return CF_API_PROXY, {}
+
+
 def _api_get(path, timeout=15):
-    """Call the proxy API and return parsed JSON."""
-    url = f"{CF_API}{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    """Call the CurseForge API and return parsed JSON.
+
+    Uses the official API (with x-api-key) when a key is configured in
+    the settings, otherwise falls back to the community proxy.
+    """
+    base, extra_headers = _get_api_base()
+    url = f"{base}{path}"
+    headers = {"User-Agent": UA}
+    headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers)
     res = urllib.request.urlopen(req, timeout=timeout)
     return json.loads(res.read())
 

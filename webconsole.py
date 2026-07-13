@@ -1082,9 +1082,39 @@ async function saveRam() {
 
 // ── Properties / Settings ──
 async function loadProperties() {
-  const d = await get('/api/properties');
-  if (!d.ok) { $('page-properties').innerHTML = `<div class="search-status">${d.error}</div>`; return; }
-  const props = d.properties || [];
+  // Load both server properties and app config in parallel
+  const [propsRes, cfgRes] = await Promise.all([
+    get('/api/properties'),
+    get('/api/config'),
+  ]);
+
+  // Build the API key section (global webconsole setting)
+  let topHtml = `<div id="propsBanner"></div>`;
+  const hasKey = cfgRes.ok && cfgRes.has_cf_api_key;
+  const existingKey = cfgRes.ok ? (cfgRes.curseforge_api_key || '') : '';
+  topHtml += `<div class="cf-api-key-section" style="background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:14px;margin-bottom:14px">
+    <h4 style="margin:0 0 8px 0;color:#e0e0e0">CurseForge API Key</h4>
+    <div style="font-size:12px;color:#888;margin-bottom:8px">
+      An API key lets the modpack installer download mods from the official CurseForge API
+      instead of the community proxy. Get one at
+      <a href="https://console.curseforge.com/" target="_blank" style="color:#58a6ff">console.curseforge.com</a>.
+    </div>
+    <div style="display:flex;gap:8px">
+      <input type="password" id="cfApiKeyInput" value="${escapeHtml(existingKey)}"
+             placeholder="Paste your CurseForge API key..."
+             style="flex:1;padding:8px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:14px;outline:none">
+      <button class="btn btn-start" onclick="saveCfApiKey()" style="padding:6px 16px;white-space:nowrap">${hasKey ? 'Update' : 'Save'}</button>
+      ${hasKey ? `<button class="btn btn-danger" onclick="clearCfApiKey()" style="padding:6px 16px;white-space:nowrap">Remove</button>` : ''}
+    </div>
+    <div id="cfApiKeyStatus" style="font-size:12px;margin-top:6px;color:#888">${hasKey ? '✅ Key is configured' : 'No key set — using community proxy'}</div>
+  </div>`;
+
+  // Render server properties
+  if (!propsRes.ok) {
+    $('page-properties').innerHTML = topHtml + `<div class="search-status">${propsRes.error}</div>`;
+    return;
+  }
+  const props = propsRes.properties || [];
   const cats = {};
   for (const p of props) {
     const cat = p.cat || 'other';
@@ -1092,7 +1122,7 @@ async function loadProperties() {
     cats[cat].push(p);
   }
   const catOrder = ['server', 'gameplay', 'world', 'network', 'other'];
-  let html = '';
+  let html = '<div style="margin-top:4px"><small style="color:#555">Server Properties</small></div>';
   for (const c of catOrder) {
     if (!cats[c]) continue;
     html += `<div class="props-cat"><h4>${c.charAt(0).toUpperCase() + c.slice(1)}</h4>`;
@@ -1118,8 +1148,41 @@ async function loadProperties() {
     html += '</div>';
   }
   html += '</div>';
-  $('page-properties').innerHTML = '<div id="propsBanner"></div>' + html;
+  $('page-properties').innerHTML = topHtml + html;
   window._propChanges = {};
+}
+
+function saveCfApiKey() {
+  const key = $('cfApiKeyInput').value.trim();
+  const status = $('cfApiKeyStatus');
+  const btn = event?.target || document.querySelector('.cf-api-key-section .btn-start');
+  if (btn) btn.disabled = true;
+  status.textContent = 'Saving...';
+  fetch('/api/config', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({curseforge_api_key: key}),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      status.textContent = '✅ Key saved!';
+      setTimeout(loadProperties, 1000);  // Refresh to update UI
+    } else {
+      status.textContent = '❌ ' + (d.error || 'Save failed');
+      if (btn) btn.disabled = false;
+    }
+  })
+  .catch(e => {
+    status.textContent = '❌ Network error';
+    if (btn) btn.disabled = false;
+  });
+}
+
+function clearCfApiKey() {
+  if (!confirm('Remove the CurseForge API key? The proxy will be used instead.')) return;
+  $('cfApiKeyInput').value = '';
+  saveCfApiKey();
 }
 
 let _saveTimeout = null;
