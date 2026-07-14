@@ -1065,6 +1065,14 @@ def register_routes(app, html):
             return ok({"message": msg})
         return fail(msg)
 
+    @app.route("/api/playit/download-win", methods=["POST"])
+    def api_playit_download_win():
+        """Download the playit.gg Windows portable EXE alongside the app."""
+        ok_, msg = mc_playit.download_windows_portable(None)
+        if ok_:
+            return ok({"message": f"Playit downloaded to: {msg}", "path": msg})
+        return fail(msg)
+
     @app.route("/api/playit/cli", methods=["POST"])
     def api_playit_cli():
         ok_, out, lines = mc_playit.run_cli()

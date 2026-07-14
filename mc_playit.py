@@ -1,11 +1,17 @@
-"""Playit.gg tunnel for Termux: playitd daemon with live log capture."""
+"""Playit.gg tunnel: daemon with live log capture.
+
+On Termux: uses playitd daemon.
+On Windows desktop: user downloads the portable exe alongside the app.
+"""
 
 import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
+import urllib.request
 from collections import deque
 from pathlib import Path
 
@@ -218,3 +224,40 @@ def get_tunnel_info():
         "claim_code": code,
         "tunnels": tunnels,
     }
+
+
+def download_windows_portable(dest_dir):
+    """Download the playit.gg Windows portable EXE to dest_dir.
+
+    Returns (success, path_or_error).
+    If dest_dir is None, uses the directory of the current executable.
+    """
+    if dest_dir is None:
+        if getattr(sys, "frozen", False):
+            dest_dir = Path(sys.executable).resolve().parent
+        else:
+            dest_dir = Path.cwd()
+    else:
+        dest_dir = Path(dest_dir)
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / "playit.exe"
+
+    # Download from the official redirect
+    url = "https://playit.gg/download/windows"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/octet-stream",
+        })
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+            dest_path.write_bytes(data)
+        # Make sure it's a valid EXE
+        if dest_path.stat().st_size < 100000:
+            dest_path.unlink(missing_ok=True)
+            return False, "Downloaded file is too small — may not be a valid EXE."
+        return True, str(dest_path)
+    except Exception as e:
+        dest_path.unlink(missing_ok=True)
+        return False, str(e)

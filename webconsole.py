@@ -1976,7 +1976,6 @@ let _tunnelPoll = null;
 
 async function loadTunnel() {
   const c = $('tunnelContent');
-  if (!_currentServer) { c.innerHTML = '<div class="search-status">Select a server to view tunnel.</div>'; return; }
   let d;
   try { d = await get('/api/playit/info'); } catch(e) { c.innerHTML = '<div class="search-status">Failed to load tunnel status.</div>'; return; }
   if (!d.ok) { c.innerHTML = '<div class="search-status">' + (d.error || 'Error loading tunnel status.') + '</div>'; return; }
@@ -1984,7 +1983,8 @@ async function loadTunnel() {
     c.innerHTML = `
       <div class="search-status" style="padding:24px">
         <p style="margin-bottom:12px">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
-        <button class="btn btn-cmd" onclick="installPlayit()">Install Playit.gg</button>
+        <button class="btn btn-cmd" onclick="downloadPlayitWin()" id="playitDlWinBtn">&#x2B07; Download Playit for Windows</button>
+        <p style="margin-top:10px;font-size:12px;color:#888">Downloads playit.exe to the app folder. Run it once to claim your tunnel, then come back here to Start Daemon.</p>
       </div>`;
     stopTunnelPoll();
     return;
@@ -2143,6 +2143,26 @@ async function installPlayit() {
   const d = await r.json();
   if (d.ok && d.installed) { toast('Playit installed!', 'success'); loadTunnel(); }
   else toast('Install failed — try manually: pkg install tur-repo && pkg install playit', 'error');
+}
+
+async function downloadPlayitWin() {
+  const btn = $('playitDlWinBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Downloading...'; }
+  try {
+    const r = await fetch('/api/playit/download-win', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      toast('Playit downloaded to: ' + d.path, 'success');
+      if (btn) btn.textContent = '&#x2713; Downloaded!';
+      setTimeout(loadTunnel, 2000);
+    } else {
+      toast(d.error || 'Download failed', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '&#x2B07; Download Playit for Windows'; }
+    }
+  } catch(e) {
+    toast('Network error during download', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '&#x2B07; Download Playit for Windows'; }
+  }
 }
 
 function updateTunnelDashboard(d) {
