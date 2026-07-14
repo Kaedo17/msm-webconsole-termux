@@ -1788,6 +1788,10 @@ function clearConsole() {
   const el = $('consoleOutput');
   if (!el) return;
   el.innerHTML = '';
+  // Also clear server-side history so reconnecting SSE doesn't repopulate
+  if (_currentServer) {
+    fetch(`/api/servers/${_currentServer}/console/clear`, {method: 'POST'}).catch(() => {});
+  }
   toast('Console cleared', 'success');
 }
 
@@ -1796,20 +1800,33 @@ function copyConsoleLogs() {
   if (!el) { toast('Console not found', 'error'); return; }
   const lines = Array.from(el.children).map(c => c.textContent.trim()).filter(Boolean).join('\n');
   if (!lines) { toast('No console output to copy', 'info'); return; }
-  navigator.clipboard.writeText(lines).then(() => {
-    toast(`Copied ${lines.split('\n').length} lines`, 'success');
-  }).catch(() => {
-    // Fallback for non-HTTPS or restricted contexts
-    const ta = document.createElement('textarea');
-    ta.value = lines;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); toast('Console logs copied!', 'success'); }
-    catch (e) { toast('Failed to copy. Select text manually.', 'error'); }
-    ta.remove();
-  });
+
+  // Use simpler, more reliable method for mobile Termux
+  const ta = document.createElement('textarea');
+  ta.value = lines;
+  ta.style.position = 'fixed';
+  ta.style.top = '0';
+  ta.style.left = '0';
+  ta.style.width = '1px';
+  ta.style.height = '1px';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, 999999);
+
+  try {
+    const ok = document.execCommand('copy');
+    if (ok) toast(`Copied ${lines.split('\n').length} lines`, 'success');
+    else {
+      // Last resort: prompt user to copy manually
+      prompt('Copy these logs manually (Ctrl+C / long press):', lines.substring(0, 2000));
+      toast('Copied to clipboard prompt', 'info');
+    }
+  } catch (e) {
+    prompt('Copy these logs manually (Ctrl+C / long press):', lines.substring(0, 2000));
+    toast('Copied to clipboard prompt', 'info');
+  }
+  ta.remove();
 }
 
 function sendCmd(e) {

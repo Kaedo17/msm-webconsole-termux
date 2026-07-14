@@ -257,6 +257,15 @@ def register_routes(app, html):
         resp.headers["Connection"] = "keep-alive"
         return resp
 
+    @app.route("/api/servers/<sid>/console/clear", methods=["POST"])
+    def api_console_clear(sid):
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        with inst.lock:
+            inst.console_history.clear()
+        return ok({"message": "Console cleared."})
+
     # ═══════════════════════════════════════════════════════════════════
     #  FILE MANAGER — per-server
     # ═══════════════════════════════════════════════════════════════════
