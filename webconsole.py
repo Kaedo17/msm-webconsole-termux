@@ -1981,10 +1981,23 @@ async function loadTunnel() {
   if (!d.ok) { c.innerHTML = '<div class="search-status">' + (d.error || 'Error loading tunnel status.') + '</div>'; return; }
   if (!d.installed) {
     c.innerHTML = `
-      <div class="search-status" style="padding:24px">
-        <p style="margin-bottom:12px">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
-        <button class="btn btn-cmd" onclick="downloadPlayitWin()" id="playitDlWinBtn">&#x2B07; Download Playit for Windows</button>
-        <p style="margin-top:10px;font-size:12px;color:#888">Downloads playit.exe to the app folder. Run it once to claim your tunnel, then come back here to Start Daemon.</p>
+      <div class="search-status" style="padding:24px;max-width:600px;margin:0 auto;text-align:left">
+        <p style="margin-bottom:12px;text-align:center">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
+        <div style="background:#151515;border:1px solid #333;border-radius:6px;padding:14px;font-size:13px;line-height:1.6">
+          <strong style="color:#5ced73">Windows Installation</strong>
+          <ol style="margin:8px 0 0 16px;color:#ccc">
+            <li>Download playit from <a href="https://playit.gg/download/windows" target="_blank" style="color:#64b5f6">playit.gg/download/windows</a></li>
+            <li>Place <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> in the same folder as this app</li>
+            <li>Run <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> and follow the setup wizard</li>
+            <li>Come back here and click <strong>Start Daemon</strong></li>
+          </ol>
+        </div>
+        <div style="background:#151515;border:1px solid #333;border-radius:6px;padding:14px;font-size:13px;line-height:1.6;margin-top:8px">
+          <strong style="color:#fdd835">Termux / Android</strong>
+          <pre style="background:#0d0d0d;padding:8px;border-radius:4px;margin:6px 0 0;overflow-x:auto;font-size:12px;color:#5ced73">pkg install tur-repo -y
+pkg install playit -y</pre>
+        </div>
+        <button class="btn btn-secondary" onclick="loadTunnel()" style="display:block;margin:14px auto 0">&#x21bb; Check Again</button>
       </div>`;
     stopTunnelPoll();
     return;
@@ -2145,25 +2158,6 @@ async function installPlayit() {
   else toast('Install failed — try manually: pkg install tur-repo && pkg install playit', 'error');
 }
 
-async function downloadPlayitWin() {
-  const btn = $('playitDlWinBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Downloading...'; }
-  try {
-    const r = await fetch('/api/playit/download-win', {method:'POST'});
-    const d = await r.json();
-    if (d.ok) {
-      toast('Playit downloaded to: ' + d.path, 'success');
-      if (btn) btn.textContent = '&#x2713; Downloaded!';
-      setTimeout(loadTunnel, 2000);
-    } else {
-      toast(d.error || 'Download failed', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = '&#x2B07; Download Playit for Windows'; }
-    }
-  } catch(e) {
-    toast('Network error during download', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '&#x2B07; Download Playit for Windows'; }
-  }
-}
 
 function updateTunnelDashboard(d) {
   const tw = document.getElementById('dashTunnel');
