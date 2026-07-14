@@ -9,9 +9,22 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def get_data_dir():
+    """Return the canonical data directory.
+
+    Frozen EXE: a 'data' folder next to the EXE (writable, survives updates).
+    Script mode: SCRIPT_DIR / 'data'  (legacy path for Termux / dev).
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return SCRIPT_DIR / "data"
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", 5000))
 JAVA_BIN = shutil.which("java") or "java"
@@ -108,7 +121,7 @@ def detect_java_versions():
                 candidates.add(str(jbin.resolve()))
 
     # 3. Check the app's own data/jdk directory (shipped/downloaded JDK)
-    app_jdk_dir = SCRIPT_DIR / "data" / "jdk"
+    app_jdk_dir = get_data_dir() / "jdk"
     if app_jdk_dir.exists():
         # Check for versioned subdirectories (jdk-8, jdk-17, jdk-21)
         for sub in app_jdk_dir.iterdir():
@@ -199,6 +212,72 @@ def clear_java_cache():
     """Force the next detect_java_versions() call to re-scan."""
     global _java_cache
     _java_cache = None
+
+
+def extract_bundled_jdks():
+    """Extract bundled JDK zip files from data/jdk-zips/ into data/jdk/.
+
+    Runs once after installation — the zips are bundled in the installer
+    so users don't need to download Java from the dashboard.  After
+    extraction the zips are deleted to save space.
+    """
+    import io as _io
+
+    zips_dir = get_data_dir() / "jdk-zips"
+    if not zips_dir.is_dir():
+        return
+    jdk_dir = get_data_dir() / "jdk"
+    jdk_dir.mkdir(parents=True, exist_ok=True)
+
+    zips = sorted(zip for zip in zips_dir.iterdir() if zip.suffix.lower() == ".zip")
+    if not zips:
+        return
+
+    for zf_path in zips:
+        try:
+            # Parse version from filename — e.g. "jdk-21_windows-x64_bin.zip"
+            ver = ""
+            for part in zf_path.stem.split("_"):
+                m = re.match(r"jdk-?(\d+)", part, re.IGNORECASE)
+                if m:
+                    ver = m.group(1)
+                    break
+
+            target = jdk_dir / f"jdk-{ver}" if ver else jdk_dir
+            target.mkdir(parents=True, exist_ok=True)
+
+            # Extract
+            with zipfile.ZipFile(str(zf_path)) as zf:
+                # Detect root folder inside zip to avoid nesting
+                roots = set()
+                for name in zf.namelist():
+                    parts = name.split("/")
+                    if parts[0]:
+                        roots.add(parts[0])
+                root = roots.pop() if len(roots) == 1 else None
+
+                if root:
+                    # Zip has a root folder — extract, then rename inner to target
+                    tmp = jdk_dir / "__extract_tmp__"
+                    tmp.mkdir(parents=True, exist_ok=True)
+                    zf.extractall(str(tmp))
+                    extracted_root = tmp / root
+                    if extracted_root.exists():
+                        # Remove the versioned target dir, move extracted over
+                        shutil.rmtree(str(target), ignore_errors=True)
+                        shutil.move(str(extracted_root), str(target))
+                    shutil.rmtree(str(tmp), ignore_errors=True)
+                else:
+                    # No root folder — extract directly
+                    zf.extractall(str(target))
+
+            # Clean up zip after successful extraction
+            zf_path.unlink(missing_ok=True)
+
+        except Exception:
+            pass  # If one fails, try the next
+
+    clear_java_cache()
 
 
 def get_java_label(java_path, show_path=False):

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "autoPort": true,
+  "configurations": [
+    {
+      "name": "webconsole",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["webconsole.py"],
+      "port": 5600
+    }
+  ]
+}

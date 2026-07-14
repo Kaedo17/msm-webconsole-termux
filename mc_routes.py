@@ -1143,9 +1143,9 @@ def register_routes(app, html):
             return fail(f"Unsupported Java version: {ver}. Supported: 8, 11, 17, 21, 22, 23, 24, 25")
         jver = version_map[ver]
 
-        # Determine install directory
-        app_dir = Path(mc_state.SCRIPT_DIR)
-        java_base = app_dir / "data" / "jdk"
+        # Determine install directory — use the app's data dir
+        app_dir = Path(mc_state.get_data_dir())
+        java_base = app_dir / "jdk"
         java_base.mkdir(parents=True, exist_ok=True)
         java_dir = java_base / f"jdk-{ver}"
         java_dir.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────
@@ -128,6 +130,60 @@ def build(debug=False):
     else:
         print(f"\n  Build completed but EXE not found at {exe_path}")
         sys.exit(1)
+
+    # Pre-download JDK bundles for installer
+    download_jdks()
+
+
+_JDK_VERSIONS = ["8", "11", "17", "21", "22", "23", "24", "25"]
+
+
+def download_jdks():
+    """Pre-download Eclipse Temurin JDK zips for all supported versions.
+
+    Saves them to dist/MinecraftWebManager/data/jdk-zips/ so the NSIS
+    installer picks them up via File /r.  On first launch the app
+    extracts them automatically.
+    """
+    dest = OUTPUT_DIR / APP_NAME / "data" / "jdk-zips"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    version_map = {
+        "8": "8", "11": "11", "17": "17", "21": "21",
+        "22": "22", "23": "23", "24": "24", "25": "25",
+    }
+
+    for ver in _JDK_VERSIONS:
+        jver = version_map[ver]
+        fname = f"jdk-{ver}_windows-x64_bin.zip"
+        fpath = dest / fname
+
+        if fpath.exists():
+            size_mb = fpath.stat().st_size / (1024 * 1024)
+            print(f"  JDK {ver}:  already present ({size_mb:.0f} MB)")
+            continue
+
+        url = f"https://api.adoptium.net/v3/binary/latest/{jver}/ga/windows/x64/jdk/hotspot/normal/eclipse"
+        print(f"  JDK {ver}:  downloading from Adoptium API...", end="", flush=True)
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/octet-stream",
+            })
+            t0 = time.time()
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                data = resp.read()
+            elapsed = time.time() - t0
+            fpath.write_bytes(data)
+            size_mb = fpath.stat().st_size / (1024 * 1024)
+            print(f"  {size_mb:.0f} MB ({elapsed:.0f}s)")
+        except Exception as e:
+            print(f"  FAILED ({e})")
+            print(f"  Warning: JDK {ver} not bundled — users can install from dashboard.")
+
+    total = sum(f.stat().st_size for f in dest.iterdir() if f.suffix == ".zip")
+    total_mb = total / (1024 * 1024)
+    print(f"  JDK zips total: {total_mb:.0f} MB")
 
 
 def build_installer():

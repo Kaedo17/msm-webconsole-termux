@@ -102,6 +102,10 @@ def main():
     # Port
     port = args.port if args.port else find_free_port(5000)
 
+    # Extract bundled JDK zips (shipped with the installer) on first launch
+    import mc_state
+    mc_state.extract_bundled_jdks()
+
     # Start Flask in a background thread
     flask_thread = threading.Thread(
         target=start_flask,

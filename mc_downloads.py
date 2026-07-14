@@ -294,7 +294,7 @@ def _find_java():
         if candidate.exists():
             return str(candidate)
     # Fallback: scan the app's own data/jdk directory
-    jdk_dir = Path(mc_state.SCRIPT_DIR) / "data" / "jdk"
+    jdk_dir = mc_state.get_data_dir() / "jdk"
     if jdk_dir.exists():
         for f in jdk_dir.rglob("java.exe") if os.name == "nt" else jdk_dir.rglob("java"):
             return str(f.resolve())

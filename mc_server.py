@@ -203,8 +203,7 @@ def _try_auto_install_java(needed_ver, inst):
     import subprocess, sys
     try:
         # Run the install via subprocess (download and extract JDK)
-        script_dir = Path(mc_state.SCRIPT_DIR)
-        java_base = script_dir / "data" / "jdk"
+        java_base = mc_state.get_data_dir() / "jdk"
         java_dir = java_base / f"jdk-{needed_ver}"
         java_exe = None
         for p in [str(java_dir / "bin" / "java.exe"), str(java_dir / "bin" / "java")]:

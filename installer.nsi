@@ -85,16 +85,18 @@ Section "Application Files" SEC_APP
   ; Copy all files from the build dist folder
   File /r "dist\MinecraftWebManager\*.*"
 
-  ; Create data directory for servers
-  CreateDirectory "$INSTDIR\data"
-  CreateDirectory "$INSTDIR\data\servers"
-  CreateDirectory "$INSTDIR\data\jdk"
-
-  ; Restore data backup from update (if any)
+  ; First, restore data backup from update (if any) — do this BEFORE
+  ; creating new data directories, so Rename doesn't fail.
   IfFileExists "$TEMP\MWM-data-backup" 0 no_restore
-    DetailPrint "Restoring server data..."
+    DetailPrint "Restoring server data from backup..."
     Rename "$TEMP\MWM-data-backup" "$INSTDIR\data"
+    Goto after_dirs
   no_restore:
+    ; No backup to restore — create fresh data directories
+    CreateDirectory "$INSTDIR\data"
+    CreateDirectory "$INSTDIR\data\servers"
+    CreateDirectory "$INSTDIR\data\jdk"
+  after_dirs:
 
   ; Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\Minecraft Web Manager"
