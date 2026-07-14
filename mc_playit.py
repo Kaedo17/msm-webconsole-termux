@@ -21,7 +21,7 @@ else:
     _APP_DIR = Path.cwd()
 
 def _find_playit_bin():
-    """Find a playit binary in PATH or next to the app."""
+    """Find a playit binary in PATH or common install locations."""
     # Search in PATH first
     for name in ["playit-cli", "playit", "playitd"]:
         p = shutil.which(name)
@@ -32,6 +32,14 @@ def _find_playit_bin():
         p = _APP_DIR / pattern
         if p.exists():
             return str(p)
+    # Search common install locations
+    for base in ["C:/Program Files", "C:/Program Files (x86)"]:
+        bp = Path(base) / "playit_gg" / "bin"
+        if bp.exists():
+            for name in ["playit.exe", "playit-cli.exe", "playitd.exe"]:
+                p = bp / name
+                if p.exists():
+                    return str(p)
     return ""
 
 _PLAYIT_BIN = _find_playit_bin()
