@@ -1121,9 +1121,9 @@ def register_routes(app, html):
         data = parse_json_body()
         ver = str(data.get("version", "21"))
         # Map version to Adoptium version number
-        version_map = {"8": "8", "11": "11", "17": "17", "21": "21"}
+        version_map = {"8": "8", "11": "11", "17": "17", "21": "21", "22": "22", "23": "23", "24": "24"}
         if ver not in version_map:
-            return fail(f"Unsupported Java version: {ver}. Supported: 8, 11, 17, 21")
+            return fail(f"Unsupported Java version: {ver}. Supported: 8, 11, 17, 21, 22, 23, 24")
         jver = version_map[ver]
 
         # Determine install directory

@@ -1180,17 +1180,18 @@ async function loadDashboard() {
             <span style="color:#fdd835;font-size:14px">${d.java_version||'Java (default)'}</span>
             <span style="font-size:12px;color:#666;margin-left:8px">(MC ${d.mc_version||'?'})</span>
           </div>
-          ${!(d.java_options && d.java_options.length) || !d.java_options.some(o => o.ver === '21') ? `
           <div id="javaInstallArea" style="margin-top:10px">
             <label style="font-size:11px;color:#888">Install a Java version:</label>
             <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
-              <button class="btn btn-cmd" onclick="installJava('21')" style="font-size:11px;padding:4px 10px">Java 21</button>
-              <button class="btn btn-cmd" onclick="installJava('17')" style="font-size:11px;padding:4px 10px">Java 17</button>
-              <button class="btn btn-cmd" onclick="installJava('11')" style="font-size:11px;padding:4px 10px">Java 11</button>
-              <button class="btn btn-cmd" onclick="installJava('8')" style="font-size:11px;padding:4px 10px">Java 8</button>
+              ${[8,11,17,21,22,23,24].map(v => {
+                const installed = (d.java_options||[]).some(o => parseInt(o.ver) === v);
+                return installed
+                  ? `<span style="font-size:11px;padding:4px 8px;background:#1a3a1a;color:#5ced73;border:1px solid #2a5a2a;border-radius:4px">Java ${v} &#x2713;</span>`
+                  : `<button class="btn btn-cmd btn-java-install" data-ver="${v}" onclick="installJava('${v}')" style="font-size:11px;padding:4px 10px">Java ${v}</button>`;
+              }).join('')}
             </div>
-            <div id="javaInstallProgress" style="font-size:11px;color:#888;margin-top:4px;display:none">Starting...</div>
-          </div>` : ''}
+            <div id="javaInstallProgress" style="font-size:11px;color:#888;margin-top:4px;display:none"></div>
+          </div>
         </div>
         <div style="flex:2;min-width:250px">
           <label style="font-size:12px;color:#888">Override Java Path <span style="color:#666">(leave empty for auto)</span></label>
@@ -1256,16 +1257,22 @@ async function saveJavaConfig() {
 
 async function installJava(ver) {
   ver = ver || '21';
-  const btn = $('installJavaBtn');
+  const btns = document.querySelectorAll('.btn-java-install');
+  const btn = document.querySelector(`.btn-java-install[data-ver="${ver}"]`);
   const prog = $('javaInstallProgress');
-  if (btn) { btn.disabled = true; btn.textContent = 'Downloading...'; }
-  if (prog) { prog.style.display = ''; prog.textContent = 'Starting...'; }
+  btns.forEach(b => b.disabled = true);
+  if (btn) btn.textContent = 'Downloading...';
+  if (prog) { prog.style.display = ''; prog.textContent = `Downloading Java ${ver}...`; prog.style.color = '#888'; }
   try {
     const r = await fetch('/api/java/install', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version: ver})});
     const d = await r.json();
-    if (!d.ok) { toast(d.error || 'Failed to start install', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; } return; }
+    if (!d.ok) {
+      toast(d.error || 'Failed to start install', 'error');
+      btns.forEach(b => { b.disabled = false; b.textContent = `Java ${b.dataset.ver}`; });
+      if (prog) { prog.textContent = d.error; prog.style.color = '#ff4444'; }
+      return;
+    }
     const taskId = d.task_id;
-    // Poll progress
     const poll = setInterval(async () => {
       try {
         const pr = await fetch('/api/java/install/status/' + taskId).then(r => r.json());
@@ -1277,19 +1284,19 @@ async function installJava(ver) {
         }
         if (p.done || p.status === 'done') {
           clearInterval(poll);
-          if (btn) { btn.textContent = '&#x2713; Installed!'; btn.disabled = true; }
-          toast(p.message || 'Java installed!', 'success');
-          setTimeout(loadDashboard, 1000);
+          if (btn) btn.textContent = '✓';
+          toast('Java ' + ver + ' installed!', 'success');
+          setTimeout(loadDashboard, 1500);
         } else if (p.status === 'error') {
           clearInterval(poll);
-          if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; }
+          btns.forEach(b => { b.disabled = false; b.textContent = `Java ${b.dataset.ver}`; });
           toast(p.message || 'Install failed', 'error');
         }
       } catch(e) { clearInterval(poll); }
     }, 1000);
   } catch(e) {
     toast('Network error', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; }
+    btns.forEach(b => { b.disabled = false; b.textContent = `Java ${b.dataset.ver}`; });
   }
 }
 

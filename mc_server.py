@@ -188,6 +188,7 @@ def _detect_needed_java(mc_version):
     if not parts:
         return 21
     parsed = tuple(int(p) for p in parts)
+    # Latest MC versions need latest Java
     if parsed >= (1, 21) or parsed >= (1, 20, 5):
         return 21
     if parsed >= (1, 17):
@@ -276,13 +277,19 @@ def start_server(inst):
     else:
         jar = _find_jar(inst)
         if not jar:
-            corrupt = sorted(inst.dir.glob("*.jar"))
-            if corrupt:
-                return False, f"No valid server jar found. Found corrupt/invalid: {corrupt[0].name}"
-            # List any .jar files for debugging
-            all_jars = [f.name for f in inst.dir.glob("*.jar")]
-            detail = f" Found: {all_jars}" if all_jars else " No .jar files in server directory."
-            return False, f"No server jar found.{detail}"
+            # Try to re-download the server jar if missing
+            import mc_downloads
+            if inst.mc_version and inst.jar_type:
+                ok_, msg = mc_downloads.download_server_jar(inst.dir, inst.jar_type, inst.mc_version)
+                if ok_:
+                    jar = _find_jar(inst)
+            if not jar:
+                corrupt = sorted(inst.dir.glob("*.jar"))
+                if corrupt:
+                    return False, f"No valid server jar found. Found corrupt/invalid: {corrupt[0].name}"
+                all_jars = [f.name for f in inst.dir.glob("*.jar")]
+                detail = f" Found: {all_jars}" if all_jars else " No .jar files in server directory."
+                return False, f"No server jar found.{detail}"
         if not _check_eula(inst):
             return False, "EULA not accepted. Edit eula.txt and set eula=true."
         _ensure_properties(inst)

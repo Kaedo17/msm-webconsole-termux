@@ -115,6 +115,36 @@ Section "Application Files" SEC_APP
   WriteRegDWORD HKLM "${PRODUCT_UNINST_KEY}" "NoRepair" 1
 SectionEnd
 
+; Optional: Download and install Java 21
+Section /o "Download Java 21" SEC_JAVA
+  SetOutPath "$INSTDIR"
+  DetailPrint "Downloading Eclipse Temurin JDK 21 (this may take a moment)..."
+  CreateDirectory "$INSTDIR\data\jdk\jdk-21"
+  ; Use PowerShell to download and extract
+  nsExec::ExecToStack 'powershell -Command "
+    \$dl = ''https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse'';
+    \$out = ''$INSTDIR\data\jdk\jdk-21-tmp.zip'';
+    Write-Host ''Downloading Java 21...'';
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;
+    \$wc = New-Object System.Net.WebClient;
+    \$wc.Headers.Add(''User-Agent'', ''Mozilla/5.0'');
+    \$wc.DownloadFile(\$dl, \$out);
+    Write-Host ''Extracting...'';
+    Expand-Archive -Path \$out -DestinationPath ''$INSTDIR\data\jdk'' -Force;
+    Remove-Item \$out -Force;
+    # Find extracted folder and rename to jdk-21
+    \$items = Get-ChildItem ''$INSTDIR\data\jdk'' -Directory | Where-Object { \$_.Name -ne ''jdk-21'' };
+    if (\$items.Count -gt 0) {
+        \$extracted = \$items[0].FullName;
+        if (Test-Path ''$INSTDIR\data\jdk\jdk-21'') { Remove-Item ''$INSTDIR\data\jdk\jdk-21'' -Recurse -Force; }
+        Rename-Item -Path \$extracted -NewName ''jdk-21'' -Force;
+    }
+    Write-Host ''Java 21 installed!'';
+  "'
+  Pop $0
+  DetailPrint $0
+SectionEnd
+
 ; Optional: Desktop shortcut
 Section /o "Desktop Shortcut" SEC_DESKTOP
   SetOutPath "$INSTDIR"
@@ -132,6 +162,7 @@ SectionEnd
 ; Descriptions
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_APP} "Core application files (required)"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_JAVA} "Download and install Eclipse Temurin JDK 21 (~180 MB)"
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} "Create a shortcut on your desktop"
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC_QUICKLAUNCH} "Add to Quick Launch toolbar"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
