@@ -13,8 +13,29 @@ import time
 from collections import deque
 from pathlib import Path
 
-_PLAYIT_CLI = shutil.which("playit-cli") or shutil.which("playit") or ""
-_PLAYITD = shutil.which("playitd") or ""
+_APP_DIR = None
+if getattr(sys, "frozen", False):
+    _APP_DIR = Path(sys.executable).resolve().parent
+else:
+    _APP_DIR = Path.cwd()
+
+def _find_playit_bin():
+    """Find a playit binary in PATH or next to the app."""
+    # Search in PATH first
+    for name in ["playit-cli", "playit", "playitd"]:
+        p = shutil.which(name)
+        if p:
+            return p
+    # Search in the app directory
+    for pattern in ["playit.exe", "playit-cli.exe", "playitd.exe", "playit-windows-x86_64-signed.exe"]:
+        p = _APP_DIR / pattern
+        if p.exists():
+            return str(p)
+    return ""
+
+_PLAYIT_BIN = _find_playit_bin()
+_PLAYIT_CLI = _PLAYIT_BIN
+_PLAYITD = _PLAYIT_BIN
 _PLAYIT_SECRET = Path.home() / ".playit" / "secret"
 
 _daemon_proc = None
@@ -87,6 +108,10 @@ def start_daemon():
         env = dict(os.environ)
         env["TERM"] = "dumb"
         env.setdefault("RUST_LOG", "info")
+        startupinfo = None
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         _daemon_proc = subprocess.Popen(
             [_PLAYITD],
             stdout=subprocess.PIPE,
@@ -95,6 +120,7 @@ def start_daemon():
             text=True,
             bufsize=1,
             env=env,
+            startupinfo=startupinfo,
         )
         _reader_thread(_daemon_proc)
         time.sleep(4)
@@ -105,6 +131,7 @@ def start_daemon():
 
 def stop_daemon():
     global _daemon_proc
+    stop_cli()
     proc = _daemon_proc
     if not proc or proc.poll() is not None:
         try:
@@ -150,13 +177,40 @@ def parse_tunnel_urls(lines):
     return tunnels
 
 
-def run_cli(timeout=12):
+_claim_proc = None
+
+
+def stop_cli():
+    """Kill any running claim CLI process."""
+    global _claim_proc
+    if _claim_proc:
+        try:
+            _claim_proc.kill()
+            _claim_proc.wait(timeout=3)
+        except Exception:
+            pass
+        _claim_proc = None
+
+
+def run_cli(timeout=120):
+    """Run playit CLI to get a claim URL.
+
+    The process must stay running while the user visits the claim URL,
+    so once we find a URL we leave the process running in the background
+    and return immediately. It will exit on its own when the claim completes.
+    """
+    global _claim_proc
+    stop_cli()  # Kill any previous claim process
     if not _PLAYIT_CLI:
         return False, "playit-cli not found", []
     try:
         env = dict(os.environ)
         env["TERM"] = "dumb"
         env["NO_COLOR"] = "1"
+        startupinfo = None
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         proc = subprocess.Popen(
             [_PLAYIT_CLI],
             stdout=subprocess.PIPE,
@@ -165,14 +219,20 @@ def run_cli(timeout=12):
             text=True,
             bufsize=1,
             env=env,
+            startupinfo=startupinfo,
         )
         collected = []
+        found_claim = False
 
         def reader():
+            nonlocal found_claim
             for line in iter(proc.stdout.readline, ""):
                 clean = _strip_ansi(line.rstrip("\n\r"))
                 if clean.strip():
                     collected.append(clean)
+                # Check if this line has a claim URL
+                if "playit.gg/claim/" in clean:
+                    found_claim = True
             for line in iter(proc.stderr.readline, ""):
                 clean = _strip_ansi(line.rstrip("\n\r"))
                 if clean.strip():
@@ -180,9 +240,26 @@ def run_cli(timeout=12):
 
         thr = threading.Thread(target=reader, daemon=True)
         thr.start()
-        thr.join(timeout=timeout)
-        proc.kill()
-        proc.wait(timeout=5)
+
+        # Wait a few seconds for the claim URL to appear
+        thr.join(timeout=8)
+
+        # If we found a claim URL, leave the process running
+        # The user needs it alive to complete the claim
+        if found_claim:
+            _claim_proc = proc
+            with _lock:
+                for line in collected:
+                    _daemon_logs.append(line)
+            return True, "\n".join(collected), collected
+
+        # No claim URL found yet — wait a bit more or kill
+        thr.join(timeout=5)
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
         with _lock:
             for line in collected:
                 _daemon_logs.append(line)

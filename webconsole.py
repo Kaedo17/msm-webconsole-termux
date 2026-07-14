@@ -2039,7 +2039,8 @@ function renderTunnelPage(d) {
     if (claimUrl) {
       html += `<div style="margin-bottom:12px"><a href="${escapeHtml(claimUrl)}" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; ${escapeHtml(claimUrl)}</a></div>`;
       if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
-      html += '<p style="color:#666;font-size:12px;margin-top:8px">Open the link above to claim your tunnel. The daemon will reconnect automatically once claimed.</p>';
+      html += '<p style="color:#fdd835;font-size:12px;margin-top:8px">&#x26A0; Keep this page open while you claim — the agent needs to stay running.</p>';
+      html += '<p style="color:#888;font-size:12px">After claiming, refresh the tunnel page and click Start Daemon.</p>';
     } else if (daemonOn) {
       html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
       html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
@@ -2141,16 +2142,19 @@ async function stopDaemon() {
 
 async function runPlayitCli() {
   const btn = $('playitCliBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Getting claim URL...'; }
   try {
     const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 40000);
+    const timeout = setTimeout(() => ac.abort(), 30000);
     const r = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
     clearTimeout(timeout);
     const d = await r.json();
     if (!d.ok) { toast(d.error || 'Failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Get Claim URL'; } return; }
-    if (d.claim_url) toast('Claim URL found!', 'success');
-    else toast('No claim URL found in output', 'info');
+    if (d.claim_url) {
+      toast('Claim URL found! Keep the agent running while you claim.', 'success');
+    } else {
+      toast('No claim URL found in output', 'info');
+    }
     loadTunnel();
   } catch(e) {
     toast('Request timed out or failed', 'error');
