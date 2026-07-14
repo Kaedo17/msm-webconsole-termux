@@ -213,13 +213,13 @@ def get_java_label(java_path, show_path=False):
     # If it's just a version number
     if ver.isdigit():
         ver_map = {"8": "Java 8", "11": "Java 11", "17": "Java 17", "21": "Java 21",
-                     "22": "Java 22", "23": "Java 23", "24": "Java 24"}
+                     "22": "Java 22", "23": "Java 23", "24": "Java 24", "25": "Java 25"}
         return ver_map.get(ver, f"Java {ver}")
     # It's a path — extract version from -version output
     major = _get_java_major_version(java_path)
     if major:
         ver_map = {8: "Java 8", 11: "Java 11", 17: "Java 17", 21: "Java 21",
-                    22: "Java 22", 23: "Java 23", 24: "Java 24"}
+                    22: "Java 22", 23: "Java 23", 24: "Java 24", 25: "Java 25"}
         label = ver_map.get(major, f"Java {major}")
         if show_path:
             return f"{label} ({java_path})"

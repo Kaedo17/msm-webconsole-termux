@@ -1183,7 +1183,7 @@ async function loadDashboard() {
           <div id="javaInstallArea" style="margin-top:10px">
             <label style="font-size:11px;color:#888">Install a Java version:</label>
             <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
-              ${[8,11,17,21,22,23,24].map(v => {
+              ${[8,11,17,21,22,23,24,25].map(v => {
                 const installed = (d.java_options||[]).some(o => parseInt(o.ver) === v);
                 return installed
                   ? `<span style="font-size:11px;padding:4px 8px;background:#1a3a1a;color:#5ced73;border:1px solid #2a5a2a;border-radius:4px">Java ${v} &#x2713;</span>`
