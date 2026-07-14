@@ -107,7 +107,13 @@ def detect_java_versions():
             if jbin.exists():
                 candidates.add(str(jbin.resolve()))
 
-    # 3. Check common JVM installation directories
+    # 3. Check the app's own data/jdk directory (shipped/downloaded JDK)
+    app_jdk_dir = SCRIPT_DIR / "data" / "jdk"
+    if app_jdk_dir.exists():
+        for f in app_jdk_dir.rglob("java.exe") if os.name == "nt" else app_jdk_dir.rglob("java"):
+            candidates.add(str(f.resolve()))
+
+    # 4. Check common JVM installation directories
     jvm_dirs = [
         # Linux / Termux
         Path("/usr/lib/jvm"),

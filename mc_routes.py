@@ -1178,8 +1178,13 @@ def register_routes(app, html):
                 if java_exe.exists():
                     from mc_state import clear_java_cache
                     clear_java_cache()
+                    # Save the installed Java path globally as default
+                    java_path_str = str(java_exe.resolve())
+                    # Re-scan so the next detect_java_versions call finds it
+                    clear_java_cache()
                     update_progress(tid, status="done", phase="done",
-                                    message=f"Java installed: {java_exe}", done=True)
+                                    message=f"Java installed at {java_path_str}", done=True,
+                                    java_path=java_path_str)
                 else:
                     update_progress(tid, status="error", phase="error",
                                     message="Extracted JDK but could not find java.exe", done=True)
