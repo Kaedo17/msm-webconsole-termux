@@ -65,6 +65,11 @@ Section "CheckPreviousInstall"
   Abort
 
   uninst:
+    ; Save data directory before removing old install
+    IfFileExists "$INSTDIR\data\*.*" 0 no_data
+      CreateDirectory "$TEMP\MWM-data-backup"
+      CopyFiles /SILENT "$INSTDIR\data\*.*" "$TEMP\MWM-data-backup"
+    no_data:
     ; Run the old uninstaller silently
     ExecWait '"$R0" /S _?=$INSTDIR'
     IfErrors no_remove
@@ -89,6 +94,13 @@ Section "Application Files" SEC_APP
   CreateDirectory "$INSTDIR\data"
   CreateDirectory "$INSTDIR\data\servers"
   CreateDirectory "$INSTDIR\data\jdk"
+
+  ; Restore data backup from update (if any)
+  IfFileExists "$TEMP\MWM-data-backup\*.*" 0 no_restore
+    DetailPrint "Restoring server data..."
+    CopyFiles /SILENT "$TEMP\MWM-data-backup\*.*" "$INSTDIR\data"
+    RMDir /r "$TEMP\MWM-data-backup"
+  no_restore:
 
   ; Start Menu shortcut
   CreateDirectory "$SMPROGRAMS\Minecraft Web Manager"
