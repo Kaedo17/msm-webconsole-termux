@@ -68,7 +68,25 @@ def install_commands():
 
 
 def is_claimed():
-    return _PLAYIT_SECRET.exists() or (Path.home() / ".config" / "playit_gg" / "playit.toml").exists()
+    if _PLAYIT_SECRET.exists():
+        return True
+    # Check common playit.gg config locations
+    for path in [
+        Path.home() / ".config" / "playit_gg" / "playit.toml",
+        Path.home() / ".playit" / "playit.toml",
+        Path.home() / "AppData" / "Local" / "playit_gg" / "playit.toml",
+        Path.home() / "AppData" / "Roaming" / "playit_gg" / "playit.toml",
+    ]:
+        if path.exists():
+            return True
+    # Also check from env vars
+    for var in ["LOCALAPPDATA", "APPDATA"]:
+        base = os.environ.get(var, "")
+        if base:
+            p = Path(base) / "playit_gg" / "playit.toml"
+            if p.exists():
+                return True
+    return False
 
 
 def _is_daemon_running():
