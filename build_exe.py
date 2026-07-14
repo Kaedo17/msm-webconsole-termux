@@ -53,6 +53,8 @@ PYINSTALLER_OPTS = [
     "--hidden-import", "mc_curseforge",
     "--hidden-import", "mc_modrinth",
     "--hidden-import", "mc_playit",
+    "--hidden-import", "mc_playit._unix",
+    "--hidden-import", "mc_playit._windows",
     "--hidden-import", "mc_app",
 ]
 

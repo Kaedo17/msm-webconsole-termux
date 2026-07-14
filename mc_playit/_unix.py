@@ -1,7 +1,10 @@
-"""Playit.gg tunnel: daemon with live log capture.
+"""Playit.gg tunnel — Unix/Termux implementation.
 
-On Termux: uses playitd daemon.
-On Windows desktop: user downloads the portable exe alongside the app.
+Uses separate binaries:
+  - playitd:  daemon process (long-lived, manages tunnels)
+  - playit-cli: CLI tool for initial claim/auth
+
+On Termux: pkg install tur-repo && pkg install playit
 """
 
 import os
@@ -19,6 +22,7 @@ if getattr(sys, "frozen", False):
     _APP_DIR = Path(sys.executable).resolve().parent
 else:
     _APP_DIR = Path.cwd()
+
 
 def _find_binary(names):
     """Find the first existing binary from a list of names."""
@@ -44,6 +48,7 @@ def _find_binary(names):
                     return str(p)
     return ""
 
+
 # Find the CLI binary (playit or playit-cli)
 _PLAYIT_CLI = _find_binary(["playit-cli", "playit"])
 # Find the daemon binary (playitd or playit)
@@ -67,6 +72,9 @@ def _strip_ansi(text):
     text = _ANSI_RE.sub('', text)
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
     return text
+
+
+# ── Public API ──────────────────────────────────────────────────────────
 
 
 def is_installed():
@@ -161,7 +169,7 @@ def start_daemon():
 
 def stop_daemon():
     global _daemon_proc
-    stop_cli()
+    _stop_cli()
     proc = _daemon_proc
     if not proc or proc.poll() is not None:
         try:
@@ -197,20 +205,22 @@ def parse_claim_url(lines):
 
 
 def parse_tunnel_urls(lines):
+    _EXCLUDE = {"api.playit.gg", "auth.playit.gg", "playit.gg"}
     tunnels = []
     for line in lines:
         m = re.search(r'([a-z0-9-]+\.playit\.gg(?::\d+)?)', line, re.IGNORECASE)
         if m:
-            addr = m.group(1)
-            if addr not in tunnels and 'claim' not in addr.lower():
-                tunnels.append(addr)
+            addr = m.group(1).lower()
+            host = addr.split(":")[0]
+            if addr not in tunnels and host not in _EXCLUDE and 'claim' not in addr:
+                tunnels.append(m.group(1))  # keep original casing
     return tunnels
 
 
 _claim_proc = None
 
 
-def stop_cli():
+def _stop_cli():
     """Kill any running claim CLI process."""
     global _claim_proc
     if _claim_proc:
@@ -230,7 +240,7 @@ def run_cli(timeout=120):
     and return immediately. It will exit on its own when the claim completes.
     """
     global _claim_proc
-    stop_cli()  # Kill any previous claim process
+    _stop_cli()  # Kill any previous claim process
     if not _PLAYIT_CLI:
         return False, "playit-cli not found", []
     try:
@@ -329,5 +339,3 @@ def get_tunnel_info():
         "claim_code": code,
         "tunnels": tunnels,
     }
-
-

@@ -1083,6 +1083,22 @@ def register_routes(app, html):
             result["claimed"] = True
         return ok(result)
 
+    @app.route("/api/playit/cli/exchange", methods=["POST"])
+    def api_playit_cli_exchange():
+        """Finalise claim after user visits the claim URL (Windows only)."""
+        complete = getattr(mc_playit, "complete_claim", None)
+        if not complete:
+            return fail("This platform does not support the exchange flow. "
+                        "Use the playit.gg website to complete setup.")
+        data = parse_json_body()
+        code = data.get("code", "").strip()
+        if not code:
+            return fail("Claim code is required.")
+        ok_, msg = complete(code)
+        if ok_:
+            return ok({"message": msg})
+        return fail(msg)
+
     @app.route("/api/config")
     def api_config_get():
         """Return the current webconsole config (no secrets by default)."""

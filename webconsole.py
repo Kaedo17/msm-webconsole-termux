@@ -2096,8 +2096,11 @@ function renderTunnelPage(d) {
     if (claimUrl) {
       html += `<div style="margin-bottom:12px"><a href="${escapeHtml(claimUrl)}" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; ${escapeHtml(claimUrl)}</a></div>`;
       if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
-      html += '<p style="color:#fdd835;font-size:12px;margin-top:8px">&#x26A0; Keep this page open while you claim — the agent needs to stay running.</p>';
-      html += '<p style="color:#888;font-size:12px">After claiming, refresh the tunnel page and click Start Daemon.</p>';
+      html += `<p style="color:#fdd835;font-size:12px;margin-top:8px">&#x26A0; Visit the URL above in your browser to sign in.</p>`;
+      if (claimCode) {
+        html += `<button class="btn btn-start" onclick="completeClaim('${escapeHtml(claimCode)}')" id="completeClaimBtn" style="margin-top:10px">&#10004; Complete Setup</button>`;
+        html += `<span id="completeClaimStatus" style="font-size:12px;color:#888;margin-left:8px"></span>`;
+      }
     } else if (daemonOn) {
       html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
       html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
@@ -2208,7 +2211,7 @@ async function runPlayitCli() {
     const d = await r.json();
     if (!d.ok) { toast(d.error || 'Failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Get Claim URL'; } return; }
     if (d.claim_url) {
-      toast('Claim URL found! Keep the agent running while you claim.', 'success');
+      toast('Claim URL ready! Visit it in your browser, then click "Complete Setup".', 'success');
     } else {
       toast('No claim URL found in output', 'info');
     }
@@ -2216,6 +2219,35 @@ async function runPlayitCli() {
   } catch(e) {
     toast('Request timed out or failed', 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Get Claim URL'; }
+  }
+}
+
+async function completeClaim(code) {
+  const btn = $('completeClaimBtn');
+  const status = $('completeClaimStatus');
+  if (btn) { btn.disabled = true; btn.textContent = 'Finalizing...'; }
+  if (status) status.textContent = 'Completing claim...';
+  try {
+    const r = await fetch('/api/playit/cli/exchange', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code: code}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Claim complete! Tunnel should be ready.', 'success');
+      if (status) status.textContent = '✅ Setup complete!';
+      if (btn) btn.textContent = '✅ Done';
+      loadTunnel();
+    } else {
+      toast(d.error || 'Setup failed', 'error');
+      if (status) status.textContent = '❌ ' + (d.error || 'Failed');
+      if (btn) { btn.disabled = false; btn.textContent = '✔ Complete Setup'; }
+    }
+  } catch(e) {
+    toast('Network error', 'error');
+    if (status) status.textContent = '❌ Network error';
+    if (btn) { btn.disabled = false; btn.textContent = '✔ Complete Setup'; }
   }
 }
 
