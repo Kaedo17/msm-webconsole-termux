@@ -20,15 +20,14 @@ if getattr(sys, "frozen", False):
 else:
     _APP_DIR = Path.cwd()
 
-def _find_playit_bin():
-    """Find a playit binary in PATH or common install locations."""
-    # Search in PATH first
-    for name in ["playit-cli", "playit", "playitd"]:
+def _find_binary(names):
+    """Find the first existing binary from a list of names."""
+    for name in names:
         p = shutil.which(name)
         if p:
             return p
     # Search in the app directory
-    for pattern in ["playit.exe", "playit-cli.exe", "playitd.exe", "playit-windows-x86_64-signed.exe"]:
+    for pattern in names + [n + ".exe" for n in names]:
         p = _APP_DIR / pattern
         if p.exists():
             return str(p)
@@ -36,15 +35,19 @@ def _find_playit_bin():
     for base in ["C:/Program Files", "C:/Program Files (x86)"]:
         bp = Path(base) / "playit_gg" / "bin"
         if bp.exists():
-            for name in ["playit.exe", "playit-cli.exe", "playitd.exe"]:
+            for name in names:
                 p = bp / name
+                if p.exists():
+                    return str(p)
+                p = bp / (name + ".exe")
                 if p.exists():
                     return str(p)
     return ""
 
-_PLAYIT_BIN = _find_playit_bin()
-_PLAYIT_CLI = _PLAYIT_BIN
-_PLAYITD = _PLAYIT_BIN
+# Find the CLI binary (playit or playit-cli)
+_PLAYIT_CLI = _find_binary(["playit-cli", "playit"])
+# Find the daemon binary (playitd or playit)
+_PLAYITD = _find_binary(["playitd", "playit"])
 _PLAYIT_SECRET = Path.home() / ".playit" / "secret"
 
 _daemon_proc = None
