@@ -280,9 +280,11 @@ def start_server(inst):
             # Try to re-download the server jar if missing
             import mc_downloads
             if inst.mc_version and inst.jar_type:
-                ok_, msg = mc_downloads.download_server_jar(inst.dir, inst.jar_type, inst.mc_version)
+                ok_, dl_msg = mc_downloads.download_server_jar(inst.dir, inst.jar_type, inst.mc_version)
                 if ok_:
                     jar = _find_jar(inst)
+                else:
+                    return False, f"Failed to download server jar: {dl_msg}"
             if not jar:
                 corrupt = sorted(inst.dir.glob("*.jar"))
                 if corrupt:
