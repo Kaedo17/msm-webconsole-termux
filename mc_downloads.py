@@ -276,7 +276,10 @@ def get_download_url(server_type, mc_version, forge_version=None):
 # ═══════════════════════════════════════════════════════════════════════
 
 def _find_java():
-    """Get the system Java binary path."""
+    """Get the system Java binary path.
+
+    Checks in order: mc_state.JAVA_BIN → JAVA_HOME → app data/jdk → fallback.
+    """
     # Primary: use mc_state.JAVA_BIN (set via shutil.which during import)
     java = getattr(mc_state, "JAVA_BIN", None)
     if java and java != "java":
@@ -287,6 +290,14 @@ def _find_java():
         candidate = Path(java_home) / "bin" / "java"
         if candidate.exists():
             return str(candidate)
+        candidate = Path(java_home) / "bin" / "java.exe"
+        if candidate.exists():
+            return str(candidate)
+    # Fallback: scan the app's own data/jdk directory
+    jdk_dir = Path(mc_state.SCRIPT_DIR) / "data" / "jdk"
+    if jdk_dir.exists():
+        for f in jdk_dir.rglob("java.exe") if os.name == "nt" else jdk_dir.rglob("java"):
+            return str(f.resolve())
     # Final fallback: let the OS resolve it
     return "java"
 
@@ -453,6 +464,44 @@ def _run_installer(server_dir, url, mc_version, forge_version, st):
 
     try:
         java_bin = _find_java()
+        # If Java not found, try to auto-download Java 17
+        if java_bin == "java" or not os.path.exists(java_bin):
+            if not shutil.which(java_bin):
+                dl_ver = "17"
+                from mc_state import detect_java_versions, clear_java_cache
+                # Check if we have any bundled Java first
+                detected = detect_java_versions()
+                if detected:
+                    # Use highest available
+                    highest = sorted(detected.keys(), key=int)[-1]
+                    java_bin = detected[highest]
+                else:
+                    # Download Java 17 (safe for most Forge versions)
+                    import uuid, io, zipfile, urllib.request
+                    app_dir = Path(mc_state.SCRIPT_DIR)
+                    java_base = app_dir / "data" / "jdk"
+                    java_dir = java_base / "jdk-17"
+                    java_base.mkdir(parents=True, exist_ok=True)
+                    dl_url = "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse"
+                    req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=300) as resp:
+                        data = resp.read()
+                    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                        root_folders = set()
+                        for name in zf.namelist():
+                            parts = name.split("/")
+                            if parts[0]:
+                                root_folders.add(parts[0])
+                        root = root_folders.pop() if root_folders else "jdk"
+                        zf.extractall(str(java_base))
+                    extracted = java_base / root
+                    if extracted.exists() and not java_dir.exists():
+                        extracted.rename(java_dir)
+                    for p in [java_dir / "bin" / "java.exe", java_dir / "bin" / "java"]:
+                        if p.exists():
+                            java_bin = str(p.resolve())
+                            clear_java_cache()
+                            break
         extra = {}
         if os.name == "nt":
             extra["startupinfo"] = subprocess.STARTUPINFO()
