@@ -24,7 +24,7 @@ CONSOLE_MAX = 500
 class ServerInstance:
     def __init__(self, sid, name, server_dir, jar_type="vanilla",
                  min_ram="512M", max_ram="2G", port=25565,
-                 mc_version="", java_bin=""):
+                 mc_version="", java_bin="", forge_version=""):
         self.id = sid
         self.name = name
         self.dir = Path(server_dir)
@@ -34,6 +34,7 @@ class ServerInstance:
         self.port = port
         self.mc_version = mc_version
         self.java_bin = java_bin
+        self.forge_version = forge_version
 
         self.proc = None
         self.console_history = []
@@ -64,6 +65,7 @@ class ServerInstance:
             "port": self.port,
             "online": self.is_running(),
             "mc_version": self.mc_version,
+            "forge_version": self.forge_version,
         }
 
     def status_dict(self):
@@ -98,6 +100,7 @@ class ServerInstance:
             "port": self.port,
             "jar_type": self.jar_type,
             "mc_version": self.mc_version,
+            "forge_version": self.forge_version,
             "java_version": java_ver,
             "java_options": [{"ver": k, "path": v} for k, v in sorted(java_opts.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)],
         }
@@ -117,6 +120,7 @@ class ServerInstance:
         existing["port"] = self.port
         existing["mc_version"] = self.mc_version
         existing["java_bin"] = self.java_bin
+        existing["forge_version"] = self.forge_version
         cfg.write_text(json.dumps(existing, indent=2))
 
     def load_config(self):
@@ -130,6 +134,7 @@ class ServerInstance:
                 self.port = data.get("port", self.port)
                 self.mc_version = data.get("mc_version", self.mc_version)
                 self.java_bin = data.get("java_bin", self.java_bin)
+                self.forge_version = data.get("forge_version", self.forge_version)
             except Exception:
                 pass
 
@@ -175,14 +180,14 @@ motd=A Minecraft Server
 
 
 def create_server(name, jar_type="vanilla", min_ram="512M", max_ram="2G",
-                  port=None, mc_version=None):
+                  port=None, mc_version=None, forge_version=None):
     sid = _gen_id(name)
     server_dir = SERVERS_BASE / sid
     server_dir.mkdir(parents=True, exist_ok=True)
     if port is None:
         port = _next_available_port()
     inst = ServerInstance(sid, name, server_dir, jar_type, min_ram, max_ram, port,
-                          mc_version=mc_version or "")
+                          mc_version=mc_version or "", forge_version=forge_version or "")
     inst.save_config()
     props = server_dir / "server.properties"
     if not props.exists():

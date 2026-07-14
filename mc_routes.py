@@ -66,7 +66,8 @@ def register_routes(app, html):
         if not re.match(r"^\d+[MG]$", mr) or not re.match(r"^\d+[MG]$", mx):
             return fail("Invalid RAM format.")
         mc_ver = data.get("mc_version", "") or mc_downloads.get_latest_minecraft_version()
-        inst = mci.create_server(name, jt, mr, mx, mc_version=mc_ver)
+        forge_ver = data.get("forge_version", "")
+        inst = mci.create_server(name, jt, mr, mx, mc_version=mc_ver, forge_version=forge_ver)
         if data.get("eula"):
             (inst.dir / "eula.txt").write_text("eula=true\n")
         seed = data.get("level_seed", "")
