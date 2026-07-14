@@ -213,9 +213,14 @@ def start_server(inst):
     else:
         cmd = java_cmd
 
+    startupinfo = None
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     proc = subprocess.Popen(cmd, cwd=str(inst.dir),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            stdin=subprocess.PIPE, text=True, bufsize=1, env=env)
+                            stdin=subprocess.PIPE, text=True, bufsize=1, env=env,
+                            startupinfo=startupinfo)
     inst.proc = proc
     t = threading.Thread(target=_reader_thread, args=(inst,), daemon=True)
     t.start()

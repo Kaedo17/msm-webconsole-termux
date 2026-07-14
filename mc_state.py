@@ -54,9 +54,13 @@ def _get_java_major_version(java_bin):
     Returns None if the binary doesn't exist or can't be run.
     """
     try:
+        extra = {}
+        if os.name == "nt":
+            extra["startupinfo"] = subprocess.STARTUPINFO()
+            extra["startupinfo"].dwFlags |= subprocess.STARTF_USESHOWWINDOW
         result = subprocess.run(
             [str(java_bin), "-version"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, **extra
         )
         # java -version outputs to stderr
         output = result.stderr or result.stdout

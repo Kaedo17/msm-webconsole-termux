@@ -27,7 +27,7 @@ VERSION = "1.0.0"
 # Base PyInstaller options
 PYINSTALLER_OPTS = [
     "--name", APP_NAME,
-    "--onefile",                # Single EXE file
+    "--onedir",                 # Folder mode (no extraction delay, less flash)
     "--noupx",                  # No UPX compression
     "--strip",                  # Strip debug symbols
     # Hidden imports — Flask
@@ -116,8 +116,8 @@ def build(debug=False):
         print(f"\n  Build FAILED (exit code {result.returncode})")
         sys.exit(1)
 
-    # Verify EXE was created
-    exe_path = OUTPUT_DIR / f"{APP_NAME}.exe"
+    # Verify EXE was created (onedir mode: inside the app folder)
+    exe_path = OUTPUT_DIR / APP_NAME / f"{APP_NAME}.exe"
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
         print(f"\n  {'=' * 50}")

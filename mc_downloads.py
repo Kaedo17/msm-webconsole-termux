@@ -453,11 +453,16 @@ def _run_installer(server_dir, url, mc_version, forge_version, st):
 
     try:
         java_bin = _find_java()
+        extra = {}
+        if os.name == "nt":
+            extra["startupinfo"] = subprocess.STARTUPINFO()
+            extra["startupinfo"].dwFlags |= subprocess.STARTF_USESHOWWINDOW
         result = subprocess.run(
             [java_bin, "-jar", str(installer_path), "--installServer"],
             cwd=str(server_dir),
             capture_output=True,
             timeout=180,
+            **extra
         )
 
         # Clean up installer log
