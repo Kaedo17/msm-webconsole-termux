@@ -105,6 +105,7 @@ def _call_playit(args, timeout=30):
         r = subprocess.run(
             [_PLAYIT] + args,
             capture_output=True, text=True, timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         out_lines = [l for l in r.stdout.split("\n") if l.strip()] if r.stdout.strip() else []
         err_lines = [l for l in r.stderr.split("\n") if l.strip()] if r.stderr.strip() else []
