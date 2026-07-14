@@ -13,7 +13,7 @@ Run on **Termux (Android)** via CLI or **Windows** as a native desktop app.
 - **World Backups** — Create & restore with one click
 - **Playit.gg Tunnel** — Share your server online without port forwarding
 - **Multi-Server** — Manage multiple server instances from one dashboard
-- **Auto Java** — Auto-downloads the correct Java version per Minecraft version (8/11/17/21)
+- **Auto Java** — Auto-downloads the correct Java version per Minecraft version (8/11/17/21/22/23/24)
 - **RAM Controls** — Adjust min/max RAM from the dashboard
 - **Properties Editor** — Visual editor for server.properties
 
@@ -43,7 +43,7 @@ The installer supports:
 - Choose install directory (default: `C:\Program Files\MinecraftWebManager`)
 - Start Menu & Desktop shortcuts
 - Windows Add/Remove Programs
-- Update detection (re-running the installer updates the app)
+- Update detection — preserves server data when updating
 
 ### Usage
 
@@ -59,7 +59,7 @@ If Java isn't installed on your system:
 - The dashboard shows a **Download & Install Java** button
 - Choose Java 8, 11, 17, or 21 depending on your Minecraft version
 - The app downloads Eclipse Temurin JDK and configures it automatically
-- When starting a server, if the required Java version is missing, it auto-downloads the right one
+- When starting a server or installing Forge, if the required Java version is missing, it auto-downloads the right one
 
 #### Tunnel Setup
 
