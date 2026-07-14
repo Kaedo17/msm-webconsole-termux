@@ -95,22 +95,71 @@ def detect_java_versions():
         if path:
             candidates.add(path)
 
-    # 2. Check common JVM installation directories
+    # 2. Check JAVA_HOME
+    java_home = os.environ.get("JAVA_HOME", "")
+    if java_home:
+        jbin = Path(java_home) / "bin" / "java"
+        if jbin.exists():
+            candidates.add(str(jbin.resolve()))
+        else:
+            # Maybe JAVA_HOME points to the JDK root without /bin
+            jbin = Path(java_home) / "bin" / "java.exe"
+            if jbin.exists():
+                candidates.add(str(jbin.resolve()))
+
+    # 3. Check common JVM installation directories
     jvm_dirs = [
+        # Linux / Termux
         Path("/usr/lib/jvm"),
-        Path("/usr/lib/jvm/java-21-openjdk/bin"),
-        Path("/usr/lib/jvm/java-17-openjdk/bin"),
-        Path("/usr/lib/jvm/java-11-openjdk/bin"),
-        Path("/usr/lib/jvm/java-8-openjdk/bin"),
-        Path("/usr/lib/jvm/java-21-amazon-corretto/bin"),
-        Path("/usr/lib/jvm/java-17-amazon-corretto/bin"),
-        Path("/usr/lib/jvm/java-21-oracle/bin"),
-        Path("/usr/lib/jvm/java-17-oracle/bin"),
         Path(Path.home() / ".local/lib/jvm"),
         Path(Path.home() / ".sdkman/candidates/java/current/bin"),
-        # Termux paths
         Path("/data/data/com.termux/files/usr/lib/jvm"),
     ]
+
+    # Windows Java install locations
+    if os.name == "nt":
+        for prog_dir in ["C:/Program Files", "C:/Program Files (x86)"]:
+            pd = Path(prog_dir)
+            if not pd.exists():
+                continue
+            # Eclipse Adoptium / Temurin
+            for vendor in ["Eclipse Adoptium", "Eclipse Foundation", "Temurin"]:
+                vd = pd / vendor
+                if vd.exists():
+                    for jdk in vd.iterdir():
+                        jbin = jdk / "bin" / "java.exe"
+                        if jbin.exists():
+                            candidates.add(str(jbin.resolve()))
+            # Microsoft JDK
+            md = pd / "Microsoft"
+            if md.exists():
+                for jdk in md.iterdir():
+                    if jdk.name.startswith("jdk-"):
+                        jbin = jdk / "bin" / "java.exe"
+                        if jbin.exists():
+                            candidates.add(str(jbin.resolve()))
+            # Amazon Corretto
+            cd = pd / "Amazon Corretto"
+            if cd.exists():
+                for jdk in cd.iterdir():
+                    jbin = jdk / "bin" / "java.exe"
+                    if jbin.exists():
+                        candidates.add(str(jbin.resolve()))
+            # Oracle Java
+            od = pd / "Java"
+            if od.exists():
+                for jdk in od.iterdir():
+                    if jdk.name.startswith("jdk-") or jdk.name.startswith("jre-"):
+                        jbin = jdk / "bin" / "java.exe"
+                        if jbin.exists():
+                            candidates.add(str(jbin.resolve()))
+            # Generic: any dir with bin/java.exe
+            for item in pd.iterdir():
+                if item.is_dir() and ("jdk" in item.name.lower() or "java" in item.name.lower() or "jre" in item.name.lower()):
+                    jbin = item / "bin" / "java.exe"
+                    if jbin.exists():
+                        candidates.add(str(jbin.resolve()))
+
     for d in jvm_dirs:
         if d.is_dir():
             java_in_dir = d / "java"
