@@ -1107,3 +1107,96 @@ def register_routes(app, html):
             mc_state.clear_config_cache()
             return ok({"message": "Settings saved."})
         return fail("Failed to save config.")
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  JAVA AUTO-INSTALL (Windows desktop)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @app.route("/api/java/install", methods=["POST"])
+    def api_java_install():
+        """Download and install Eclipse Temurin JDK alongside the app."""
+        from mc_helpers import create_progress, update_progress, get_progress
+        import io, zipfile, urllib.request, uuid
+
+        # Determine install directory (alongside the EXE or in cwd/data)
+        app_dir = Path(mc_state.SCRIPT_DIR)
+        java_dir = app_dir / "data" / "jdk"
+        java_dir.mkdir(parents=True, exist_ok=True)
+
+        tid = create_progress()
+        update_progress(tid, status="running", phase="downloading", message="Starting download...", current=0, total=100)
+
+        def _run_install():
+            try:
+                update_progress(tid, phase="downloading", message="Downloading Eclipse Temurin JDK 21...")
+
+                # Adoptium API redirects to the latest Temurin JDK 21 zip
+                dl_url = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse"
+                req = urllib.request.Request(dl_url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "application/octet-stream",
+                })
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    total_size = int(resp.headers.get("Content-Length", 0))
+                    downloaded = 0
+                    chunks = []
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            pct = int(downloaded * 100 / total_size)
+                            update_progress(tid, current=pct, message=f"Downloading... {downloaded // 1048576} MB / {total_size // 1048576} MB")
+
+                data = b"".join(chunks)
+                update_progress(tid, phase="extracting", message="Extracting JDK...", current=90)
+
+                # Extract zip to java_dir
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    # Find the root folder name in the zip
+                    root_folders = set()
+                    for name in zf.namelist():
+                        parts = name.split("/")
+                        if parts[0]:
+                            root_folders.add(parts[0])
+                    root = root_folders.pop() if root_folders else "jdk"
+
+                    # Extract
+                    zf.extractall(str(java_dir))
+
+                # Find the java.exe inside the extracted JDK
+                extracted_jdk = java_dir / root
+                java_exe = extracted_jdk / "bin" / "java.exe"
+                if not java_exe.exists():
+                    # Search for it
+                    for f in java_dir.rglob("java.exe"):
+                        java_exe = f
+                        break
+
+                if java_exe.exists():
+                    from mc_state import clear_java_cache
+                    clear_java_cache()
+                    update_progress(tid, status="done", phase="done",
+                                    message=f"Java installed: {java_exe}", done=True)
+                else:
+                    update_progress(tid, status="error", phase="error",
+                                    message="Extracted JDK but could not find java.exe", done=True)
+
+            except Exception as e:
+                update_progress(tid, status="error", phase="error",
+                                message=f"Install failed: {e}", error=str(e), done=True)
+
+        import threading as _thr
+        _thr.Thread(target=_run_install, daemon=True).start()
+
+        return ok({"task_id": tid, "message": "Java install started"})
+
+    @app.route("/api/java/install/status/<task_id>")
+    def api_java_install_status(task_id):
+        from mc_helpers import get_progress
+        p = get_progress(task_id)
+        if p is None:
+            return fail("Task not found.", 404)
+        return ok({"progress": p})

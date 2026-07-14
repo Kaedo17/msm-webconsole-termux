@@ -1180,6 +1180,11 @@ async function loadDashboard() {
             <span style="color:#fdd835;font-size:14px">${d.java_version||'Java (default)'}</span>
             <span style="font-size:12px;color:#666;margin-left:8px">(MC ${d.mc_version||'?'})</span>
           </div>
+          ${!(d.java_options && d.java_options.length) ? `
+          <div id="javaInstallArea" style="margin-top:10px">
+            <button class="btn btn-cmd" id="installJavaBtn" onclick="installJava()" style="font-size:12px;padding:6px 14px">&#x2B07; Download & Install Java</button>
+            <div id="javaInstallProgress" style="font-size:11px;color:#888;margin-top:4px;display:none">Starting...</div>
+          </div>` : ''}
         </div>
         <div style="flex:2;min-width:250px">
           <label style="font-size:12px;color:#888">Override Java Path <span style="color:#666">(leave empty for auto)</span></label>
@@ -1241,6 +1246,44 @@ async function saveJavaConfig() {
   }
   btn.disabled = false;
   btn.textContent = 'Save';
+}
+
+async function installJava() {
+  const btn = $('installJavaBtn');
+  const prog = $('javaInstallProgress');
+  if (btn) { btn.disabled = true; btn.textContent = 'Downloading...'; }
+  if (prog) { prog.style.display = ''; prog.textContent = 'Starting...'; }
+  try {
+    const r = await fetch('/api/java/install', {method:'POST'});
+    const d = await r.json();
+    if (!d.ok) { toast(d.error || 'Failed to start install', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; } return; }
+    const taskId = d.task_id;
+    // Poll progress
+    const poll = setInterval(async () => {
+      try {
+        const pr = await fetch('/api/java/install/status/' + taskId).then(r => r.json());
+        if (!pr.ok || !pr.progress) { clearInterval(poll); return; }
+        const p = pr.progress;
+        if (prog) {
+          prog.textContent = p.message || p.phase || '...';
+          prog.style.color = p.status === 'error' ? '#ff4444' : '#888';
+        }
+        if (p.done || p.status === 'done') {
+          clearInterval(poll);
+          if (btn) { btn.textContent = '&#x2713; Installed!'; btn.disabled = true; }
+          toast(p.message || 'Java installed!', 'success');
+          setTimeout(loadDashboard, 1000);
+        } else if (p.status === 'error') {
+          clearInterval(poll);
+          if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; }
+          toast(p.message || 'Install failed', 'error');
+        }
+      } catch(e) { clearInterval(poll); }
+    }, 1000);
+  } catch(e) {
+    toast('Network error', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; }
+  }
 }
 
 // ── Properties / Settings ──
