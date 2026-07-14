@@ -128,17 +128,51 @@ def build(debug=False):
         sys.exit(1)
 
 
+def build_installer():
+    """Build a Windows installer using NSIS (if available)."""
+    nsis = shutil.which("makensis") or shutil.which("makensis.exe")
+    if not nsis:
+        nsis_paths = [
+            "C:/Program Files (x86)/NSIS/makensis.exe",
+            "C:/Program Files/NSIS/makensis.exe",
+        ]
+        for p in nsis_paths:
+            if os.path.exists(p):
+                nsis = p
+                break
+
+    if not nsis:
+        print("\n  NSIS (makensis) not found. Install from https://nsis.sourceforge.io/")
+        print("  Then run: makensis installer.nsi")
+        return
+
+    print(f"  Building installer with NSIS...")
+    result = subprocess.run([nsis, "installer.nsi"], cwd=os.path.dirname(__file__) or ".")
+    if result.returncode == 0:
+        print(f"  Installer created: MinecraftWebManager_Setup_{VERSION}.exe")
+    else:
+        print(f"  Installer build FAILED (exit code {result.returncode})")
+
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     debug = "--debug" in sys.argv
-    if "--clean" in sys.argv:
+    clean_build = "--clean" in sys.argv
+    make_installer = "--installer" in sys.argv
+
+    if clean_build:
         clean()
 
     print(f"  Building {APP_NAME} v{VERSION}...")
     print()
     build(debug=debug)
-    print()
-    print("  Done! Distribute the EXE file in the 'dist/' folder.")
+
+    if make_installer:
+        build_installer()
+    else:
+        print()
+        print("  Done! Distribute the EXE file in the 'dist/' folder.")
+        print("  To build an installer, install NSIS and run: python build_exe.py --installer")
