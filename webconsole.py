@@ -1984,12 +1984,12 @@ async function loadTunnel() {
       <div class="search-status" style="padding:24px;max-width:600px;margin:0 auto;text-align:left">
         <p style="margin-bottom:12px;text-align:center">Playit.gg lets you share your Minecraft server online without port forwarding.</p>
         <div style="background:#151515;border:1px solid #333;border-radius:6px;padding:14px;font-size:13px;line-height:1.6">
-          <strong style="color:#5ced73">Windows Installation</strong>
+          <strong style="color:#5ced73">Windows Setup</strong>
           <ol style="margin:8px 0 0 16px;color:#ccc">
-            <li>Download playit from <a href="https://playit.gg/download/windows" target="_blank" style="color:#64b5f6">playit.gg/download/windows</a></li>
+            <li>Download from <a href="https://playit.gg/download/windows" target="_blank" style="color:#64b5f6">playit.gg/download/windows</a></li>
             <li>Place <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> in the same folder as this app</li>
-            <li>Run <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> and follow the setup wizard</li>
-            <li>Come back here and click <strong>Start Daemon</strong></li>
+            <li><strong>First time:</strong> run <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> directly to sign in</li>
+            <li>Close it, then relaunch this app and click <strong>Start Daemon</strong></li>
           </ol>
         </div>
         <div style="background:#151515;border:1px solid #333;border-radius:6px;padding:14px;font-size:13px;line-height:1.6;margin-top:8px">
@@ -2041,8 +2041,17 @@ function renderTunnelPage(d) {
       if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
       html += '<p style="color:#666;font-size:12px;margin-top:8px">Open the link above to claim your tunnel. The daemon will reconnect automatically once claimed.</p>';
     } else if (daemonOn) {
-      html += '<p style="color:#ccc;font-size:13px">Daemon is running but no claim URL found yet.</p>';
-      html += '<p style="color:#666;font-size:12px;margin-top:6px">Click "Get Claim URL" above, or visit <a href="https://playit.gg/claim" target="_blank" style="color:#64b5f6">playit.gg/claim</a></p>';
+      html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
+      html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
+      html += '<strong style="color:#fdd835">&#x26A0; First-time setup required</strong>';
+      html += '<ol style="margin:6px 0 0 16px;color:#ccc">';
+      html += '<li>Close this app (to free the port)</li>';
+      html += '<li>Run <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> from the app folder</li>';
+      html += '<li>Sign in / create an account in the browser that opens</li>';
+      html += '<li>Once set up, close playit.exe and relaunch this app</li>';
+      html += '<li>Start the daemon — it should connect automatically</li>';
+      html += '</ol>';
+      html += '<p style="color:#888;font-size:12px;margin-top:6px">Or click <strong>Get Claim URL</strong> above if a URL appears.</p></div>';
     } else {
       html += '<p style="color:#888;font-size:13px">Start the daemon to get a claim URL.</p>';
     }
