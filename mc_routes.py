@@ -1118,20 +1118,32 @@ def register_routes(app, html):
         from mc_helpers import create_progress, update_progress, get_progress
         import io, zipfile, urllib.request, uuid
 
-        # Determine install directory (alongside the EXE or in cwd/data)
+        data = parse_json_body()
+        ver = str(data.get("version", "21"))
+        # Map version to Adoptium version number
+        version_map = {"8": "8", "11": "11", "17": "17", "21": "21"}
+        if ver not in version_map:
+            return fail(f"Unsupported Java version: {ver}. Supported: 8, 11, 17, 21")
+        jver = version_map[ver]
+
+        # Determine install directory
         app_dir = Path(mc_state.SCRIPT_DIR)
-        java_dir = app_dir / "data" / "jdk"
+        java_base = app_dir / "data" / "jdk"
+        java_base.mkdir(parents=True, exist_ok=True)
+        java_dir = java_base / f"jdk-{ver}"
         java_dir.mkdir(parents=True, exist_ok=True)
 
         tid = create_progress()
-        update_progress(tid, status="running", phase="downloading", message="Starting download...", current=0, total=100)
+        update_progress(tid, status="running", phase="downloading",
+                        message=f"Downloading Eclipse Temurin JDK {ver}...", current=0, total=100)
 
         def _run_install():
             try:
-                update_progress(tid, phase="downloading", message="Downloading Eclipse Temurin JDK 21...")
+                update_progress(tid, phase="downloading",
+                                message=f"Downloading Eclipse Temurin JDK {ver}...")
 
-                # Adoptium API redirects to the latest Temurin JDK 21 zip
-                dl_url = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse"
+                # Adoptium API redirects to the latest Temurin JDK zip
+                dl_url = f"https://api.adoptium.net/v3/binary/latest/{jver}/ga/windows/x64/jdk/hotspot/normal/eclipse"
                 req = urllib.request.Request(dl_url, headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Accept": "application/octet-stream",
@@ -1178,16 +1190,14 @@ def register_routes(app, html):
                 if java_exe.exists():
                     from mc_state import clear_java_cache
                     clear_java_cache()
-                    # Save the installed Java path globally as default
                     java_path_str = str(java_exe.resolve())
-                    # Re-scan so the next detect_java_versions call finds it
                     clear_java_cache()
                     update_progress(tid, status="done", phase="done",
-                                    message=f"Java installed at {java_path_str}", done=True,
+                                    message=f"Java {ver} installed", done=True,
                                     java_path=java_path_str)
                 else:
                     update_progress(tid, status="error", phase="error",
-                                    message="Extracted JDK but could not find java.exe", done=True)
+                                    message=f"Extracted JDK but could not find java.exe", done=True)
 
             except Exception as e:
                 update_progress(tid, status="error", phase="error",

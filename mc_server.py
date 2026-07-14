@@ -181,9 +181,89 @@ def _make_forge_cmd(inst, args_file):
     ]
 
 
+def _detect_needed_java(mc_version):
+    """Determine required Java major version from MC version."""
+    import re
+    parts = re.findall(r"\d+", mc_version)
+    if not parts:
+        return 21
+    parsed = tuple(int(p) for p in parts)
+    if parsed >= (1, 21) or parsed >= (1, 20, 5):
+        return 21
+    if parsed >= (1, 17):
+        return 17
+    if parsed >= (1, 13):
+        return 11
+    return 8
+
+
+def _try_auto_install_java(needed_ver, inst):
+    """Try to install the required Java version. Returns error string or None on success."""
+    import subprocess, sys
+    try:
+        # Run the install via subprocess (download and extract JDK)
+        script_dir = Path(mc_state.SCRIPT_DIR)
+        java_base = script_dir / "data" / "jdk"
+        java_dir = java_base / f"jdk-{needed_ver}"
+        java_exe = None
+        for p in [str(java_dir / "bin" / "java.exe"), str(java_dir / "bin" / "java")]:
+            if os.path.exists(p):
+                java_exe = p
+                break
+        if java_exe:
+            # Already installed, just not detected — clear cache
+            mc_state.clear_java_cache()
+            return None
+
+        # Not installed — download it
+        java_base.mkdir(parents=True, exist_ok=True)
+        import urllib.request, io, zipfile
+        dl_url = f"https://api.adoptium.net/v3/binary/latest/{needed_ver}/ga/windows/x64/jdk/hotspot/normal/eclipse"
+        req = urllib.request.Request(dl_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = resp.read()
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            root_folders = set()
+            for name in zf.namelist():
+                parts = name.split("/")
+                if parts[0]:
+                    root_folders.add(parts[0])
+            root = root_folders.pop() if root_folders else "jdk"
+            zf.extractall(str(java_base))
+        # Rename the extracted folder to jdk-{ver}
+        extracted = java_base / root
+        if extracted.exists() and not java_dir.exists():
+            extracted.rename(java_dir)
+
+        # Find java.exe
+        for p in [java_dir / "bin" / "java.exe", java_dir / "bin" / "java"]:
+            if p.exists():
+                mc_state.clear_java_cache()
+                inst.java_bin = str(p.resolve())
+                inst.save_config()
+                return None
+        return f"Downloaded JDK {needed_ver} but could not find java.exe"
+    except Exception as e:
+        return f"Auto-install Java {needed_ver} failed: {e}"
+
+
 def start_server(inst):
     if inst.is_running():
         return False, "Server already running."
+
+    # Check if Java binary actually exists
+    java_bin = _get_java_bin(inst)
+    if not os.path.exists(java_bin) and not shutil.which(java_bin):
+        # Java not found — try auto-installing the right version
+        if inst.mc_version:
+            needed_ver = _detect_needed_java(inst.mc_version)
+            msg = _try_auto_install_java(needed_ver, inst)
+            if msg:
+                return False, msg
+        # Check again after potential install
+        java_bin = _get_java_bin(inst)
+        if not os.path.exists(java_bin) and not shutil.which(java_bin):
+            return False, f"Java not found. Click 'Download & Install Java' in the Dashboard to install Java."
 
     # Check for modern Forge (1.18+) — uses @arg files, not standalone jar
     args_file = _find_forge_args_file(inst.dir)
@@ -199,7 +279,10 @@ def start_server(inst):
             corrupt = sorted(inst.dir.glob("*.jar"))
             if corrupt:
                 return False, f"No valid server jar found. Found corrupt/invalid: {corrupt[0].name}"
-            return False, "No server jar found."
+            # List any .jar files for debugging
+            all_jars = [f.name for f in inst.dir.glob("*.jar")]
+            detail = f" Found: {all_jars}" if all_jars else " No .jar files in server directory."
+            return False, f"No server jar found.{detail}"
         if not _check_eula(inst):
             return False, "EULA not accepted. Edit eula.txt and set eula=true."
         _ensure_properties(inst)

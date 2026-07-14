@@ -1180,9 +1180,15 @@ async function loadDashboard() {
             <span style="color:#fdd835;font-size:14px">${d.java_version||'Java (default)'}</span>
             <span style="font-size:12px;color:#666;margin-left:8px">(MC ${d.mc_version||'?'})</span>
           </div>
-          ${!(d.java_options && d.java_options.length) ? `
+          ${!(d.java_options && d.java_options.length) || !d.java_options.some(o => o.ver === '21') ? `
           <div id="javaInstallArea" style="margin-top:10px">
-            <button class="btn btn-cmd" id="installJavaBtn" onclick="installJava()" style="font-size:12px;padding:6px 14px">&#x2B07; Download & Install Java</button>
+            <label style="font-size:11px;color:#888">Install a Java version:</label>
+            <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+              <button class="btn btn-cmd" onclick="installJava('21')" style="font-size:11px;padding:4px 10px">Java 21</button>
+              <button class="btn btn-cmd" onclick="installJava('17')" style="font-size:11px;padding:4px 10px">Java 17</button>
+              <button class="btn btn-cmd" onclick="installJava('11')" style="font-size:11px;padding:4px 10px">Java 11</button>
+              <button class="btn btn-cmd" onclick="installJava('8')" style="font-size:11px;padding:4px 10px">Java 8</button>
+            </div>
             <div id="javaInstallProgress" style="font-size:11px;color:#888;margin-top:4px;display:none">Starting...</div>
           </div>` : ''}
         </div>
@@ -1248,13 +1254,14 @@ async function saveJavaConfig() {
   btn.textContent = 'Save';
 }
 
-async function installJava() {
+async function installJava(ver) {
+  ver = ver || '21';
   const btn = $('installJavaBtn');
   const prog = $('javaInstallProgress');
   if (btn) { btn.disabled = true; btn.textContent = 'Downloading...'; }
   if (prog) { prog.style.display = ''; prog.textContent = 'Starting...'; }
   try {
-    const r = await fetch('/api/java/install', {method:'POST'});
+    const r = await fetch('/api/java/install', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version: ver})});
     const d = await r.json();
     if (!d.ok) { toast(d.error || 'Failed to start install', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Download & Install Java'; } return; }
     const taskId = d.task_id;

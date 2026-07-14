@@ -110,6 +110,12 @@ def detect_java_versions():
     # 3. Check the app's own data/jdk directory (shipped/downloaded JDK)
     app_jdk_dir = SCRIPT_DIR / "data" / "jdk"
     if app_jdk_dir.exists():
+        # Check for versioned subdirectories (jdk-8, jdk-17, jdk-21)
+        for sub in app_jdk_dir.iterdir():
+            if sub.is_dir():
+                for f in sub.rglob("java.exe") if os.name == "nt" else sub.rglob("java"):
+                    candidates.add(str(f.resolve()))
+        # Also check directly (legacy location)
         for f in app_jdk_dir.rglob("java.exe") if os.name == "nt" else app_jdk_dir.rglob("java"):
             candidates.add(str(f.resolve()))
 
