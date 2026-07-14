@@ -36,7 +36,6 @@
 !insertmacro MUI_PAGE_INSTFILES
 ; Finish page
 !define MUI_FINISHPAGE_RUN "$INSTDIR\MinecraftWebManager.exe"
-!define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\README.txt"
 !insertmacro MUI_PAGE_FINISH
 
 ; Uninstaller pages
@@ -85,9 +84,6 @@ Section "Application Files" SEC_APP
 
   ; Copy all files from the build dist folder
   File /r "dist\MinecraftWebManager\*.*"
-
-  ; Copy README
-  File "dist\README.txt"
 
   ; Create data directory for servers
   CreateDirectory "$INSTDIR\data"
