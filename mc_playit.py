@@ -88,7 +88,7 @@ def is_claimed():
         if path.exists():
             return True
     # Also check from env vars
-    for var in ["LOCALAPPDATA", "APPDATA"]:
+    for var in ["LOCALAPPDATA", "APPDATA", "PROGRAMDATA"]:
         base = os.environ.get(var, "")
         if base:
             p = Path(base) / "playit_gg" / "playit.toml"
