@@ -54,7 +54,12 @@ class ServerInstance:
         return self._lock
 
     def is_running(self):
-        return self.proc is not None and self.proc.poll() is None
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        # Fallback: orphaned process from EXE upgrade — port still occupied
+        if self.proc is None and _is_port_open(self.port):
+            return True
+        return False
 
     def to_dict(self):
         return {
