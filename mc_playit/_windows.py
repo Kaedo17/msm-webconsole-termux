@@ -1,17 +1,11 @@
-"""Playit.gg tunnel — Windows detection only.
+"""Playit.gg tunnel — Windows implementation.
 
-On Windows, playit.gg is managed externally by the user through:
-  - The system tray app (playitd-tray.exe) — auto-starts on boot
-  - The official playit.gg installer / CLI
+Manages the playit CLI (playit.exe) for setup, auth, and monitoring.
+The daemon (playitd) can be managed through the CLI or via the system tray app.
 
-This module only DETECTS the state of playit.gg on the system:
-  - Is playit installed?        (playit.exe found)
-  - Is it claimed?              (playit.toml has secret_key)
-  - Is the daemon running?      (playitd-tray.exe or service active)
-  - Tunnel info from daemon log (tunnel_count, addresses)
-
-It does NOT start/stop the daemon or handle the claim flow.
-Users manage playit through the tray icon or playit CLI directly.
+On Windows, playit.gg can be managed two ways:
+  - CLI mode:  run_cli() / start_daemon() / stop_daemon() via playit.exe
+  - Tray app:  playitd-tray.exe in the system tray (auto-starts on boot)
 """
 
 import os
@@ -37,8 +31,6 @@ _PLAYIT_LOG = None
 
 _daemon_logs = deque(maxlen=500)
 _lock = threading.Lock()
-
-_MANAGED_EXTERNALLY = True  # Windows: managed through tray app / playit CLI
 
 
 def _find_playit():
@@ -108,7 +100,7 @@ def _read_log_file(n=100):
 
 
 def _is_service_running():
-    """Check if playit service is running via 'playit status'."""
+    """Check if playit daemon is running via 'playit status'."""
     if not _PLAYIT:
         return False
     try:
@@ -134,6 +126,39 @@ def _is_tray_running():
         return "playitd-tray.exe" in r.stdout
     except Exception:
         return False
+
+
+def _get_daemon_phase():
+    """Get the current daemon phase string from 'playit status'."""
+    if not _PLAYIT:
+        return "unknown"
+    try:
+        r = subprocess.run(
+            [_PLAYIT, "status"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for line in r.stdout.splitlines():
+            if "Phase:" in line:
+                return line.split("Phase:")[-1].strip()
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+_ansi_re = re.compile(
+    r'\x1b\[[0-9;]*[a-zA-Z]'
+    r'|\x1b\][^\x07]*\x07'
+    r'|\x1b[()][AB012]'
+    r'|\x1b[=>]'
+    r'|\x1b\[\?[0-9]+[hl]'
+)
+
+
+def _strip_ansi(text):
+    text = _ansi_re.sub('', text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    return text
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -162,19 +187,197 @@ def _is_daemon_running():
 
 
 def start_daemon():
-    return False, "Playit is managed externally on Windows — use the tray app or 'playit start' in a terminal."
+    """Start the playit daemon. Tries CLI first, then falls back to info message."""
+    if _is_daemon_running():
+        return True, "Daemon already running."
+
+    phase = _get_daemon_phase()
+
+    # If daemon service exists but is waiting for secret, no need to "start" it
+    if _is_service_running() and phase == "waiting for secret":
+        return True, "Daemon is running but waiting for authentication. Run the tunnel setup."
+
+    # Try starting via CLI
+    if _PLAYIT:
+        try:
+            r = subprocess.run(
+                [_PLAYIT, "start"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if r.returncode == 0:
+                time.sleep(2)
+                if _is_daemon_running():
+                    _append_logs(["[WebConsole] Daemon started via CLI"])
+                    return True, "Daemon started."
+                else:
+                    # Started but not detected — check phase
+                    new_phase = _get_daemon_phase()
+                    if new_phase == "waiting for secret":
+                        return True, "Daemon started but needs authentication. Run tunnel setup."
+                    return True, "Daemon start command issued."
+            # Return the CLI output as info
+            msg = r.stderr.strip() or r.stdout.strip() or "Unknown error"
+            # If it says already running, treat as success
+            if "already running" in msg.lower() or "already started" in msg.lower():
+                return True, "Daemon already running."
+            return False, f"playit start failed: {msg}"
+        except subprocess.TimeoutExpired:
+            return False, "playit start timed out after 15s."
+        except Exception as e:
+            return False, f"playit start error: {e}"
+
+    # If no playit CLI found, guide the user
+    if _is_tray_running():
+        return True, "Daemon running via tray app."
+    return False, ("Playit not running. Open the playit.gg tray app from the Start Menu, "
+                   "or run 'playit start' in a terminal.")
 
 
 def stop_daemon():
-    return False, "Playit is managed externally on Windows — use the tray app or 'playit stop' in a terminal."
+    """Stop the playit daemon via CLI."""
+    if _PLAYIT:
+        try:
+            r = subprocess.run(
+                [_PLAYIT, "stop"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _append_logs(["[WebConsole] Daemon stopped via CLI"])
+            return True, "Daemon stop command issued."
+        except subprocess.TimeoutExpired:
+            return False, "playit stop timed out after 15s."
+        except Exception as e:
+            return False, f"playit stop error: {e}"
+    return False, ("Playit not found. Stop it via the tray app or "
+                   "run 'playit stop' in a terminal.")
 
 
-def run_cli():
-    return False, "Use the playit tray app or run 'playit setup' in a terminal to claim.", []
+_claim_proc = None
+
+
+def _stop_cli():
+    """Kill any running claim CLI process."""
+    global _claim_proc
+    if _claim_proc:
+        try:
+            _claim_proc.kill()
+            _claim_proc.wait(timeout=3)
+        except Exception:
+            pass
+        _claim_proc = None
+
+
+def run_cli(timeout=120):
+    """Run playit CLI to get a claim URL.
+
+    On Windows, runs 'playit' which enters the setup/claim flow.
+    The process must stay running while the user visits the claim URL,
+    so once we find a URL we leave the process running in the background.
+    It will exit on its own when the claim completes.
+    """
+    global _claim_proc
+    _stop_cli()
+    if not _PLAYIT:
+        return False, "playit not found.", []
+
+    try:
+        env = dict(os.environ)
+        env["TERM"] = "dumb"
+        env["NO_COLOR"] = "1"
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        proc = subprocess.Popen(
+            [_PLAYIT],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+            env=env,
+            startupinfo=startupinfo,
+        )
+        collected = []
+        found_claim = False
+
+        def reader():
+            nonlocal found_claim
+            for line in iter(proc.stdout.readline, ""):
+                clean = _strip_ansi(line.rstrip("\n\r"))
+                if clean.strip():
+                    collected.append(clean)
+                if "playit.gg/claim/" in clean:
+                    found_claim = True
+            for line in iter(proc.stderr.readline, ""):
+                clean = _strip_ansi(line.rstrip("\n\r"))
+                if clean.strip():
+                    collected.append(clean)
+
+        thr = threading.Thread(target=reader, daemon=True)
+        thr.start()
+
+        # Wait for the claim URL to appear (up to 8 seconds)
+        thr.join(timeout=8)
+
+        # If we found a claim URL, leave the process running
+        if found_claim:
+            _claim_proc = proc
+            with _lock:
+                for line in collected:
+                    _daemon_logs.append(line)
+            return True, "\n".join(collected), collected
+
+        # No claim URL yet — wait a bit more or kill
+        thr.join(timeout=5)
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+        with _lock:
+            for line in collected:
+                _daemon_logs.append(line)
+        return True, "\n".join(collected), collected
+
+    except Exception as e:
+        return False, str(e), []
 
 
 def complete_claim(code):
-    return False, "Use the playit tray app to claim your agent."
+    """Finalise claim after user visits the claim URL (Windows only)."""
+    if not _PLAYIT:
+        return False, "playit not found."
+    try:
+        # After the user visits the URL, the running playit process
+        # should detect the claim and save the secret automatically.
+        # If the process already exited, try running claim command.
+        if _claim_proc and _claim_proc.poll() is None:
+            # Still running — wait for it to detect the claim
+            try:
+                _claim_proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                _claim_proc.kill()
+            _stop_cli()
+            # Check if the secret was saved
+            if is_claimed():
+                _append_logs(["[WebConsole] Claim completed successfully"])
+                return True, "Claim completed!"
+            # If not claimed yet, try using the exchange code
+        if code:
+            proc = subprocess.run(
+                [_PLAYIT, "setup", "--claim", code],
+                capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            out = (proc.stdout + proc.stderr).strip()
+            if proc.returncode == 0 or "success" in out.lower() or "claimed" in out.lower():
+                _append_logs(["[WebConsole] Claim completed via exchange code"])
+                return True, "Claim completed!"
+            return False, f"Claim failed: {out}"
+        return False, "No claim code provided."
+    except Exception as e:
+        return False, str(e)
 
 
 def get_logs(n=100):
@@ -239,7 +442,6 @@ def get_tunnel_info():
         "claimed": claimed,
         "daemon_running": daemon_on,
         "running": claimed and daemon_on,
-        "managed_externally": True,
         "logs": logs,
         "claim_url": url,
         "claim_code": code,

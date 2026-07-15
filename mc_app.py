@@ -1,12 +1,14 @@
-"""Desktop application launcher for Minecraft Web Manager.
+"""Desktop launcher for Minecraft Web Manager — browser mode.
 
-Uses PyWebView to embed the web UI in a native window — no browser needed.
-Data is stored in a "data" folder next to the EXE for easy access.
+Runs the Flask web server and opens it in your default browser.
+No embedded native window, no PyWebView needed.
 
 Usage:
-    python mc_app.py                     # Launch desktop app
-    python mc_app.py --port 8080         # Use a custom port
+    python mc_app.py                          # Launch with auto port
+    python mc_app.py --port 8080              # Custom port
+    python mc_app.py --host 0.0.0.0           # Access from other devices on LAN
     python mc_app.py --data-dir "C:/my-servers"  # Custom data directory
+    python mc_app.py --no-browser             # Don't auto-open browser
 """
 
 import argparse
@@ -29,11 +31,9 @@ def get_default_data_dir():
     When running as a script: a "data" folder in the current directory.
     """
     if getattr(sys, "frozen", False):
-        # Packaged EXE — use the EXE's own directory
         exe_dir = Path(sys.executable).resolve().parent
         return exe_dir / "data"
     else:
-        # Running as script — use the current working directory
         return Path.cwd() / "data"
 
 
@@ -55,12 +55,11 @@ def find_free_port(start=5000, max_attempts=50):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Flask server thread
+#  Flask server
 # ═══════════════════════════════════════════════════════════════════════
 
-def start_flask(data_dir, port):
-    """Configure paths and start Flask in the current thread (blocking)."""
-    # Configure server storage to use the app data directory
+def start_flask(data_dir, host, port):
+    """Configure paths and start Flask (blocking)."""
     import mc_instances as mci
 
     servers_dir = data_dir / "servers"
@@ -75,14 +74,13 @@ def start_flask(data_dir, port):
     print(f" Minecraft Web Manager")
     print(f"  Data directory:  {data_dir}")
     print(f"  Servers:         {servers_dir}")
-    print(f"  Web port:        {port}")
+    print(f"  Web URL:         http://{host}:{port}")
 
     if not mci.all_servers():
-        print(f"  No servers yet — create one from the app UI.")
+        print(f"  No servers yet — create one from the web UI.")
 
-    # Start Flask (threaded mode prevents one slow request from blocking others)
     from webconsole import app
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -90,9 +88,16 @@ def start_flask(data_dir, port):
 # ═══════════════════════════════════════════════════════════════════════
 
 def main():
-    ap = argparse.ArgumentParser(description="Minecraft Web Manager — Desktop App")
-    ap.add_argument("--port", type=int, default=0, help="Web UI port (default: auto)")
-    ap.add_argument("--data-dir", type=str, default=None, help="Data directory (default: 'data' folder next to the EXE)")
+    ap = argparse.ArgumentParser(description="Minecraft Web Manager")
+    ap.add_argument("--host", type=str, default="127.0.0.1",
+                    help="Bind address (default: 127.0.0.1). Use 0.0.0.0 to allow "
+                         "access from other devices on your LAN.")
+    ap.add_argument("--port", type=int, default=0,
+                    help="Web UI port (default: auto, starts from 5000)")
+    ap.add_argument("--data-dir", type=str, default=None,
+                    help="Data directory (default: 'data' folder next to launcher)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="Don't auto-open browser on start")
     args = ap.parse_args()
 
     # Data directory
@@ -101,54 +106,25 @@ def main():
 
     # Port
     port = args.port if args.port else find_free_port(5000)
+    host = args.host
 
-    # Start Flask in a background thread
-    flask_thread = threading.Thread(
-        target=start_flask,
-        args=(data_dir, port),
-        daemon=True,
-    )
-    flask_thread.start()
-    time.sleep(1.5)  # Give Flask a moment to start
+    # Auto-open browser after a short delay (in a background thread)
+    if not args.no_browser:
+        def _open_browser():
+            time.sleep(1.5)
+            try:
+                import webbrowser
+                url = f"http://localhost:{port}"
+                webbrowser.open(url)
+            except Exception:
+                pass
+        threading.Thread(target=_open_browser, daemon=True).start()
 
-    # Open native window with PyWebView
+    # Start Flask (blocking — runs until Ctrl+C / window close)
     try:
-        import webview
-
-        # Window config
-        window = webview.create_window(
-            title="Minecraft Web Manager",
-            url=f"http://127.0.0.1:{port}",
-            width=1200,
-            height=800,
-            resizable=True,
-            min_size=(900, 600),
-            confirm_close=True,
-            # Use MS Edge WebView2 on Windows (built-in on Win 10+)
-            # Falls back to CEF if not available
-        )
-
-        # Block until the window is closed
-        webview.start(
-            debug=False,
-            http_server=False,  # We run our own Flask server
-        )
-
-    except ImportError:
-        print(" PyWebView not available — falling back to browser mode.")
-        print(f" Open http://127.0.0.1:{port} in your browser.")
-        print(" Press Ctrl+C to stop.")
-        try:
-            import webbrowser
-            webbrowser.open(f"http://127.0.0.1:{port}")
-        except Exception:
-            pass
-        # Keep the main thread alive while Flask runs in the background
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            pass
+        start_flask(data_dir, host, port)
+    except KeyboardInterrupt:
+        pass
 
     print("  Shutting down.")
 
