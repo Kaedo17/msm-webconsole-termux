@@ -82,7 +82,7 @@ def start_flask(data_dir, port):
 
     # Start Flask
     from webconsole import app
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════

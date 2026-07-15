@@ -2073,6 +2073,7 @@ function renderTunnelPage(d) {
   const tunnels = d.tunnels || [];
   const claimUrl = d.claim_url;
   const claimCode = d.claim_code;
+  const managedExternally = d.managed_externally || false;
 
   let html = '<div class="status-grid">';
   const statusColor = running ? '#5ced73' : (daemonOn ? '#f90' : '#ff4444');
@@ -2083,36 +2084,49 @@ function renderTunnelPage(d) {
   if (tunnels.length) html += `<div class="stat-card"><div class="sc-label">Tunnels</div><div class="sc-val" style="color:#64b5f6">${tunnels.length}</div></div>`;
   html += '</div>';
 
-  html += '<div class="server-actions">';
-  if (!daemonOn) html += '<button class="btn btn-start" onclick="startDaemon()" id="daemonBtn">Start Daemon</button>';
-  if (daemonOn && !claimed) html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Get Claim URL</button>';
-  if (daemonOn) html += '<button class="btn btn-stop" onclick="stopDaemon()" id="stopDaemonBtn">Stop Daemon</button>';
-  html += '<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>';
-  html += '</div>';
-
-  if (!claimed) {
-    html += '<div style="margin-top:16px;padding:16px;background:#1a2a1a;border:1px solid #3a4a3a;border-radius:8px">';
-    html += '<h3 style="margin-bottom:12px;font-size:14px;color:#5ced73">&#9654; Claim Your Tunnel</h3>';
-    if (claimUrl) {
-      html += `<div style="margin-bottom:12px"><a href="${escapeHtml(claimUrl)}" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; ${escapeHtml(claimUrl)}</a></div>`;
-      if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
-      html += `<p style="color:#fdd835;font-size:12px;margin-top:8px">&#x26A0; Visit the URL above in your browser to sign in.</p>`;
-      if (claimCode) {
-        html += `<button class="btn btn-start" onclick="completeClaim('${escapeHtml(claimCode)}')" id="completeClaimBtn" style="margin-top:10px">&#10004; Complete Setup</button>`;
-        html += `<span id="completeClaimStatus" style="font-size:12px;color:#888;margin-left:8px"></span>`;
-      }
-    } else if (daemonOn) {
-      html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
-      html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
-      html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn" style="margin-bottom:8px">&#9654; Get Claim URL</button>';
-      html += '<p style="color:#888;font-size:12px">Get a claim URL above, visit it in your browser, then click <strong>Complete Setup</strong>.</p>';
-      html += '<p style="color:#666;font-size:12px;margin-top:6px">Or sign in at <a href="https://playit.gg/account" target="_blank" style="color:#64b5f6">playit.gg/account</a> to manage your tunnels.</p>';
-    } else {
-      html += '<p style="color:#888;font-size:13px">Start the daemon to get a claim URL.</p>';
-    }
+  if (managedExternally) {
+    // Windows: playit is managed through the tray app / CLI directly
+    html += '<div class="server-actions">';
+    html += '<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>';
     html += '</div>';
-  } else if (claimUrl) {
-    html += `<div style="margin-top:8px;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;font-size:12px;color:#666">Claim URL: <a href="${escapeHtml(claimUrl)}" target="_blank" style="color:#64b5f6">${escapeHtml(claimUrl)}</a></div>`;
+    html += '<div style="margin-top:8px;padding:12px 16px;background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;font-size:13px;color:#888;line-height:1.6">';
+    html += 'Playit is managed through the <strong>playit.gg system tray app</strong> or CLI.<br>';
+    html += 'Open the tray icon to manage your tunnels, or visit ';
+    html += '<a href="https://playit.gg/account" target="_blank" style="color:#64b5f6">playit.gg/account</a>.';
+    html += '</div>';
+  } else {
+    // Unix/Termux: webconsole manages playit directly
+    html += '<div class="server-actions">';
+    if (!daemonOn) html += '<button class="btn btn-start" onclick="startDaemon()" id="daemonBtn">Start Daemon</button>';
+    if (daemonOn && !claimed) html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn">&#9654; Get Claim URL</button>';
+    if (daemonOn) html += '<button class="btn btn-stop" onclick="stopDaemon()" id="stopDaemonBtn">Stop Daemon</button>';
+    html += '<button class="btn btn-secondary" onclick="loadTunnel()">&#x21bb; Refresh</button>';
+    html += '</div>';
+
+    if (!claimed) {
+      html += '<div style="margin-top:16px;padding:16px;background:#1a2a1a;border:1px solid #3a4a3a;border-radius:8px">';
+      html += '<h3 style="margin-bottom:12px;font-size:14px;color:#5ced73">&#9654; Claim Your Tunnel</h3>';
+      if (claimUrl) {
+        html += `<div style="margin-bottom:12px"><a href="${escapeHtml(claimUrl)}" target="_blank" class="btn btn-cmd" style="text-decoration:none;display:inline-block;padding:8px 18px;font-size:14px">&#x2197; ${escapeHtml(claimUrl)}</a></div>`;
+        if (claimCode) html += `<div style="font-size:13px;color:#888">Claim code: <code style="background:#111;padding:3px 7px;border-radius:3px;font-size:14px;color:#64b5f6;user-select:all">${escapeHtml(claimCode)}</code></div>`;
+        html += `<p style="color:#fdd835;font-size:12px;margin-top:8px">&#x26A0; Visit the URL above in your browser to sign in.</p>`;
+        if (claimCode) {
+          html += `<button class="btn btn-start" onclick="completeClaim('${escapeHtml(claimCode)}')" id="completeClaimBtn" style="margin-top:10px">&#10004; Complete Setup</button>`;
+          html += `<span id="completeClaimStatus" style="font-size:12px;color:#888;margin-left:8px"></span>`;
+        }
+      } else if (daemonOn) {
+        html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
+        html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
+        html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn" style="margin-bottom:8px">&#9654; Get Claim URL</button>';
+        html += '<p style="color:#888;font-size:12px">Get a claim URL above, visit it in your browser, then click <strong>Complete Setup</strong>.</p>';
+        html += '<p style="color:#666;font-size:12px;margin-top:6px">Or sign in at <a href="https://playit.gg/account" target="_blank" style="color:#64b5f6">playit.gg/account</a> to manage your tunnels.</p>';
+      } else {
+        html += '<p style="color:#888;font-size:13px">Start the daemon to get a claim URL.</p>';
+      }
+      html += '</div>';
+    } else if (claimUrl) {
+      html += `<div style="margin-top:8px;padding:8px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;font-size:12px;color:#666">Claim URL: <a href="${escapeHtml(claimUrl)}" target="_blank" style="color:#64b5f6">${escapeHtml(claimUrl)}</a></div>`;
+    }
   }
 
   if (tunnels.length) {
@@ -2589,7 +2603,7 @@ def main():
                 pass
         threading.Thread(target=_open_browser, daemon=True).start()
 
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

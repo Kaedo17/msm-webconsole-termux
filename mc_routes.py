@@ -692,6 +692,15 @@ def register_routes(app, html):
 
         # If server is online, send the command via console
         if inst.is_running():
+            cmd_lower = cmd.lower().strip()
+            if cmd_lower == "remove":
+                # 'remove' is NOT a valid Minecraft server command.
+                # Modify JSON files directly + kick if the player is online.
+                ok_, msg = _remove_player_completely(inst, name)
+                if ok_ and name:
+                    send_server(inst, f"kick {name} Removing player from server")
+                return ok({"message": msg}) if ok_ else fail(msg)
+
             if name:
                 full_cmd = f"{cmd} {name}"
             else:
