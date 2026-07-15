@@ -2196,10 +2196,10 @@ async function stopDaemon() {
 
 async function runPlayitCli() {
   const btn = $('playitCliBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Getting claim URL...'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting daemon...'; }
   try {
     const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 30000);
+    const timeout = setTimeout(() => ac.abort(), 90000);
     const r = await fetch('/api/playit/cli', {method:'POST', signal: ac.signal});
     clearTimeout(timeout);
     const d = await r.json();

@@ -308,10 +308,11 @@ _CLAIM_CODE = None
 def run_cli(timeout=120):
     """Generate a playit.gg claim code and URL.
 
-    Two-step flow:
-      1. `playit claim generate` → random claim code
-      2. `playit claim url <code>` → URL for the user to visit
-      3. Returns immediately.  User visits URL, then calls complete_claim().
+    Flow:
+      1. Start daemon first (daemon must be running for claim to work)
+      2. `playit claim generate` → random claim code
+      3. `playit claim url <code>` → URL for the user to visit
+      4. Returns immediately.  User visits URL, then calls complete_claim().
 
     Returns (ok, raw_output, lines).
     """
@@ -319,7 +320,17 @@ def run_cli(timeout=120):
     if not _PLAYIT:
         return False, "playit.exe not found", []
 
-    ok, out, err = _call_playit(["claim", "generate"], timeout=15)
+    # Daemon MUST be running for the claim to work — the playit.gg website
+    # needs to see the connected agent to associate the claim.
+    if not _is_daemon_running():
+        ok_start, msg_start = start_daemon()
+        if not ok_start:
+            return False, f"Need daemon running first: {msg_start}", []
+        time.sleep(3)
+
+    # Run generate — keeps a background agent alive so the website
+    # can detect it during the claim.
+    ok, out, err = _call_playit(["claim", "generate"], timeout=timeout)
     if not ok or not out:
         msg = "; ".join(err[-3:]) if err else ("; ".join(out[-3:]) if out else "No claim code")
         return False, msg, out + err
