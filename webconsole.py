@@ -665,7 +665,8 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   $(`page-${name}`).classList.add('active');
   if (name === 'console') setupConsole();
-  else if (name === 'files') loadFileTree();
+  else { stopConsolePoll(); if (consoleStream) { consoleStream.close(); consoleStream = null; } }
+  if (name === 'files') loadFileTree();
   else if (name === 'backups') loadBackups();
   else if (name === 'dashboard') loadDashboard();
   else if (name === 'properties') loadProperties();
@@ -924,6 +925,7 @@ async function loadServers() {
 function selectServer(sid) {
   _currentServer = sid;
   $('serverSelect').value = sid;
+  stopConsolePoll();
   if (consoleStream) { consoleStream.close(); consoleStream = null; }
   if (!$('page-servers').classList.contains('active')) {
     showPage('dashboard');
@@ -937,6 +939,7 @@ function onServerChange() {
   const sid = $('serverSelect').value;
   if (!sid) return;
   _currentServer = sid;
+  stopConsolePoll();
   if (consoleStream) { consoleStream.close(); consoleStream = null; }
   showPage('dashboard');
   pollStatus();
@@ -1792,27 +1795,45 @@ async function removePack(path, name) {
 }
 
 // ── Console ──
+let _consolePoll = null;
+let _consoleIndex = 0;
+
 function setupConsole() {
-  if (consoleStream) return;
+  if (consoleStream) { consoleStream.close(); consoleStream = null; }
   if (!_currentServer) { toast('Select a server first', 'info'); return; }
   const out = $('consoleOutput');
-  const es = new EventSource(`/api/servers/${_currentServer}/console`);
-  consoleStream = es;
-  es.onmessage = e => {
-    const d = JSON.parse(e.data);
-    if (!d || !d.lines || !d.lines.length) return;
-    if (d.type === 'history') {
-      out.innerHTML = '';
+  if (!out) return;
+  _consoleIndex = 0;
+
+  // Stop any existing poll
+  stopConsolePoll();
+
+  // Initial fetch + poll every 2 seconds
+  pollConsoleLogs();
+  _consolePoll = setInterval(pollConsoleLogs, 2000);
+}
+
+async function pollConsoleLogs() {
+  if (!_currentServer) return;
+  try {
+    const r = await fetch(`/api/servers/${_currentServer}/console/logs?after=${_consoleIndex}`);
+    const d = await r.json();
+    if (!d.ok || !d.lines) return;
+    if (d.lines.length) {
+      const out = $('consoleOutput');
+      if (!out) return;
+      if (out.children.length === 1 && out.children[0].textContent.includes('not running') && out.children[0].textContent.includes('start')) {
+        out.innerHTML = '';
+      }
       for (const line of d.lines) appendConsoleLine(out, line);
       out.scrollTop = out.scrollHeight;
-      return;
     }
-    if (out.children.length === 1 && out.children[0].textContent.includes('not running')) {
-      out.innerHTML = '';
-    }
-    for (const line of d.lines) appendConsoleLine(out, line);
-    out.scrollTop = out.scrollHeight;
-  };
+    _consoleIndex = d.index || _consoleIndex;
+  } catch(e) {}
+}
+
+function stopConsolePoll() {
+  if (_consolePoll) { clearInterval(_consolePoll); _consolePoll = null; }
 }
 
 function appendConsoleLine(out, line) {
@@ -2603,11 +2624,7 @@ def main():
                 pass
         threading.Thread(target=_open_browser, daemon=True).start()
 
-    try:
-        from waitress import serve
-        serve(app, host=host, port=port, threads=8, send_bytes=1)
-    except ImportError:
-        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

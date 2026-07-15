@@ -220,7 +220,7 @@ def register_routes(app, html):
         return ok({"message": msg}) if ok_ else fail(msg)
 
     # ═══════════════════════════════════════════════════════════════════
-    #  CONSOLE (SSE) — per-server
+    #  CONSOLE (SSE + fallback polling) — per-server
     # ═══════════════════════════════════════════════════════════════════
 
     @app.route("/api/servers/<sid>/console")
@@ -257,6 +257,17 @@ def register_routes(app, html):
         resp.headers["X-Accel-Buffering"] = "no"
         resp.headers["Connection"] = "keep-alive"
         return resp
+
+    @app.route("/api/servers/<sid>/console/logs")
+    def api_console_logs(sid):
+        """Return console logs as plain JSON (polling fallback)."""
+        inst = _resolve(sid)
+        if not inst:
+            return fail("Server not found.", 404)
+        after = int(request.args.get("after", "0"))
+        history = inst.console_history
+        new_lines = history[after:] if after < len(history) else []
+        return ok({"lines": new_lines, "index": len(history)})
 
     @app.route("/api/servers/<sid>/console/clear", methods=["POST"])
     def api_console_clear(sid):

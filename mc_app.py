@@ -80,14 +80,9 @@ def start_flask(data_dir, port):
     if not mci.all_servers():
         print(f"  No servers yet — create one from the app UI.")
 
-    # Start Flask with waitress (multithreaded, no freezing)
+    # Start Flask (threaded mode prevents one slow request from blocking others)
     from webconsole import app
-    try:
-        from waitress import serve
-        # send_bytes=1 prevents SSE buffering (console logs stream in real-time)
-        serve(app, host="127.0.0.1", port=port, threads=8, send_bytes=1)
-    except ImportError:
-        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════
