@@ -42,6 +42,8 @@ PYINSTALLER_OPTS = [
     "--hidden-import", "webview.platforms.edgechromium",
     "--hidden-import", "webview.platforms.win32_edge",
     "--hidden-import", "proxy_tools",
+    # Hidden imports — waitress (production WSGI server, prevents freezing)
+    "--hidden-import", "waitress",
     # Hidden imports — app modules
     "--hidden-import", "mc_state",
     "--hidden-import", "mc_helpers",

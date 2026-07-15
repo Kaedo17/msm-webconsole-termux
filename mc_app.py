@@ -80,9 +80,13 @@ def start_flask(data_dir, port):
     if not mci.all_servers():
         print(f"  No servers yet — create one from the app UI.")
 
-    # Start Flask
+    # Start Flask with waitress (multithreaded, no freezing)
     from webconsole import app
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+    try:
+        from waitress import serve
+        serve(app, host="127.0.0.1", port=port, threads=8)
+    except ImportError:
+        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════

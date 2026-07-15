@@ -2603,7 +2603,11 @@ def main():
                 pass
         threading.Thread(target=_open_browser, daemon=True).start()
 
-    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    try:
+        from waitress import serve
+        serve(app, host=host, port=port, threads=8)
+    except ImportError:
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
