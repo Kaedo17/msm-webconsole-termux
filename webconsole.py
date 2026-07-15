@@ -2104,15 +2104,9 @@ function renderTunnelPage(d) {
     } else if (daemonOn) {
       html += '<p style="color:#ccc;font-size:13px">Daemon is running but not claimed yet.</p>';
       html += '<div style="background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:12px;margin-top:8px;font-size:13px;line-height:1.6">';
-      html += '<strong style="color:#fdd835">&#x26A0; First-time setup required</strong>';
-      html += '<ol style="margin:6px 0 0 16px;color:#ccc">';
-      html += '<li>Close this app (to free the port)</li>';
-      html += '<li>Run <code style="background:#222;padding:1px 6px;border-radius:3px">playit.exe</code> from the app folder</li>';
-      html += '<li>Sign in / create an account in the browser that opens</li>';
-      html += '<li>Once set up, close playit.exe and relaunch this app</li>';
-      html += '<li>Start the daemon — it should connect automatically</li>';
-      html += '</ol>';
-      html += '<p style="color:#888;font-size:12px;margin-top:6px">Or click <strong>Get Claim URL</strong> above if a URL appears.</p></div>';
+      html += '<button class="btn btn-cmd" onclick="runPlayitCli()" id="playitCliBtn" style="margin-bottom:8px">&#9654; Get Claim URL</button>';
+      html += '<p style="color:#888;font-size:12px">Get a claim URL above, visit it in your browser, then click <strong>Complete Setup</strong>.</p>';
+      html += '<p style="color:#666;font-size:12px;margin-top:6px">Or sign in at <a href="https://playit.gg/account" target="_blank" style="color:#64b5f6">playit.gg/account</a> to manage your tunnels.</p>';
     } else {
       html += '<p style="color:#888;font-size:13px">Start the daemon to get a claim URL.</p>';
     }

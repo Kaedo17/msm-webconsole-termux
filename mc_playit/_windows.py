@@ -1,13 +1,17 @@
 """Playit.gg tunnel — Windows implementation.
 
-Uses the modern playit CLI (playit.exe) as a single binary:
-  - playit start / stop / status   — service management
-  - playit claim generate / url / exchange — account claim
-  - playit setup                   — secret provisioning
-  - playit attach                  — live log streaming (via IPC)
+On Windows, playit.gg is typically installed via its own installer
+(C:\\Program Files\\playit_gg\\bin\\playit.exe) and runs as either:
+  - A system tray app (playitd-tray.exe) — auto-starts on boot
+  - A Windows service managed via `playit start / stop / status`
 
-The daemon is managed as a Windows service via `playit start/stop`.
-Tunnels are configured through the playit.gg web dashboard.
+The webconsole detects whichever is running and reports status
+accordingly.  It does NOT try to compete with the tray app —
+if the tray app is active, the webconsole reads the shared
+daemon log for tunnel info.
+
+Tunnel addresses are configured through the playit.gg web dashboard
+at https://playit.gg/account — the CLI no longer outputs them.
 """
 
 import os
@@ -28,7 +32,7 @@ else:
     _APP_DIR = Path.cwd()
 
 
-_PLAYIT = None          # Path to playit.exe
+_PLAYIT = None          # Path to playit.exe (CLI)
 _PLAYIT_TOML = None     # Path to playit.toml config
 _PLAYIT_LOG = None      # Path to playitd.log
 
@@ -46,12 +50,10 @@ def _find_playit():
     p = shutil.which("playit") or shutil.which("playit.exe")
     if p:
         return str(Path(p).resolve())
-    # App directory (frozen EXE sidecar)
     for name in ["playit.exe", "playit"]:
         p = _APP_DIR / name
         if p.exists():
             return str(p.resolve())
-    # Official installer location
     for base in ["C:/Program Files", "C:/Program Files (x86)"]:
         p = Path(base) / "playit_gg" / "bin" / "playit.exe"
         if p.exists():
@@ -78,8 +80,7 @@ def _find_log():
     """Determine daemon log file path."""
     prog_data = os.environ.get("PROGRAMDATA", "")
     if prog_data:
-        p = Path(prog_data) / "playit_gg" / "logs" / "playitd.log"
-        return str(p.resolve())
+        return str(Path(prog_data) / "playit_gg" / "logs" / "playitd.log")
     return str(Path.home() / ".playit" / "playitd.log")
 
 
@@ -90,7 +91,7 @@ def _init():
     _PLAYIT_LOG = _find_log()
 
 
-_init()   # Run at module import
+_init()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -110,7 +111,6 @@ def _call_playit(args, timeout=30):
         out_lines = [l for l in r.stdout.split("\n") if l.strip()] if r.stdout.strip() else []
         err_lines = [l for l in r.stderr.split("\n") if l.strip()] if r.stderr.strip() else []
         ok = r.returncode == 0
-        # Buffer output lines for log viewing
         if out_lines:
             _append_logs(out_lines)
         return ok, out_lines, err_lines
@@ -118,23 +118,6 @@ def _call_playit(args, timeout=30):
         return False, [], ["Command timed out"]
     except Exception as e:
         return False, [], [str(e)]
-
-
-def _call_playit_bg(args):
-    """Launch a playit CLI command in the background (no wait). Returns Popen."""
-    if not _PLAYIT:
-        return None
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    return subprocess.Popen(
-        [_PLAYIT] + args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,
-        text=True,
-        bufsize=1,
-        startupinfo=startupinfo,
-    )
 
 
 def _append_logs(lines):
@@ -158,32 +141,39 @@ def _read_log_file(n=100):
         return []
 
 
-def _parse_status_field(lines, field):
-    """Extract a field value from 'playit status' output.
+def _kill_tray():
+    """Kill playitd-tray.exe if running (returns True if killed)."""
+    try:
+        r = subprocess.run(
+            ["taskkill", "-f", "-im", "playitd-tray.exe"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
-    e.g. _parse_status_field(lines, "Phase:") → "waiting for secret"
-    """
+
+def _is_tray_running():
+    """Check if playitd-tray.exe is running."""
+    try:
+        r = subprocess.run(
+            ["tasklist", "/fi", "imagename eq playitd-tray.exe"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return "playitd-tray.exe" in r.stdout
+    except Exception:
+        return False
+
+
+def _tunnel_count_from_logs(lines):
+    """Parse tunnel_count from daemon log lines."""
     for line in lines:
-        if field in line:
-            idx = line.find(field)
-            return line[idx + len(field):].strip()
-    return ""
-
-
-_CLAIM_PROC = None
-_CLAIM_CODE = None
-
-
-def _stop_claim_proc():
-    """Kill any lingering claim-exchange background process."""
-    global _CLAIM_PROC
-    if _CLAIM_PROC:
-        try:
-            _CLAIM_PROC.terminate()
-            _CLAIM_PROC.wait(timeout=5)
-        except Exception:
-            pass
-        _CLAIM_PROC = None
+        m = re.search(r'tunnel_count=(\d+)', line)
+        if m:
+            return int(m.group(1))
+    return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -196,15 +186,15 @@ def is_installed():
 
 
 def install_commands():
-    """Windows: no package-manager install available.
+    """Windows: no package-manager install.
 
-    Returns empty list — user must download from playit.gg/download/windows.
+    User downloads from https://playit.gg/download/windows.
     """
     return []
 
 
 def is_claimed():
-    """Check if the playit agent has a valid secret key on disk."""
+    """Check if the playit agent has a secret key on disk."""
     if not _PLAYIT_TOML:
         return False
     try:
@@ -215,51 +205,84 @@ def is_claimed():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Public API  —  Daemon Management
+#  Public API  —  Daemon Detection / Management
 # ═══════════════════════════════════════════════════════════════════════
 
-def _is_daemon_running():
-    """Check if the playit Windows service is running via 'playit status'."""
+def _is_service_running():
+    """Check if playit Windows service is running via 'playit status'."""
     if not _PLAYIT:
         return False
     ok, out, _ = _call_playit(["status"])
     if not ok and not out:
         return False
-    phase = _parse_status_field(out, "Phase:")
-    if phase and phase not in ("", "stopped"):
-        # "running", "waiting for secret", etc — any non-empty phase = alive
-        pid = _parse_status_field(out, "PID:")
-        return bool(pid) or bool(phase)
-    return bool(_parse_status_field(out, "PID:"))
+    # Look for PID — if present, the service is alive
+    for line in out:
+        if line.strip().startswith("PID:"):
+            return True
+    # Phase also indicates it's running
+    for line in out:
+        if "Phase:" in line and "stopped" not in line.lower():
+            return True
+    return False
+
+
+def _is_daemon_running():
+    """Check if ANY playit daemon process is active (service or tray)."""
+    return _is_service_running() or _is_tray_running()
 
 
 def start_daemon():
-    """Start the playit Windows service via 'playit start'."""
+    """Start the playit daemon.
+
+    Kills the tray app first if running, then starts the service
+    via 'playit start'.
+    """
     if not _PLAYIT:
         return False, "playit.exe not found"
-    if _is_daemon_running():
+
+    # If the service is already running, we're good
+    if _is_service_running():
         return True, "Service already running"
+
+    # If the tray is running, we can piggyback on it
+    if _is_tray_running():
+        return True, "Tray app already running"
+
+    # Start the service
     ok, out, err = _call_playit(["start"], timeout=45)
     if ok:
         time.sleep(3)
-        return True, "Service started"
+        if _is_service_running():
+            return True, "Service started"
+        return True, "Service start initiated (check status in a moment)"
     msg = "; ".join(err[-3:]) if err else "; ".join(out[-3:]) if out else "Failed to start"
     return False, msg
 
 
 def stop_daemon():
-    """Stop the playit Windows service via 'playit stop'."""
+    """Stop the playit daemon.
+
+    Try 'playit stop' for the service, then kill the tray app if still running.
+    """
+    # Try stopping the service first
     ok, out, err = _call_playit(["stop"], timeout=30)
-    if ok:
-        return True, "Service stopped"
-    # "already stopped" / "not running" is not an error
-    for line in out + err:
-        if "not running" in line.lower() or "stopped" in line.lower():
-            return True, "Service already stopped"
+    if not ok:
+        for line in out + err:
+            if "not running" in line.lower() or "stopped" in line.lower():
+                ok = True
+                break
+
+    # Kill the tray app too
+    _kill_tray()
+
     if not _is_daemon_running():
-        return True, "Service already stopped"
-    msg = "; ".join(err[-3:]) if err else "; ".join(out[-3:]) if out else "Failed to stop"
-    return False, msg
+        _append_logs(["[daemon] Stopped by user"])
+        return True, "Daemon stopped"
+
+    if not ok:
+        msg = "; ".join(err[-3:]) if err else "; ".join(out[-3:]) if out else "Failed to stop"
+        return False, msg
+    return True, "Daemon stopped"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -271,7 +294,6 @@ def get_logs(n=100):
     file_logs = _read_log_file(n)
     with _lock:
         mem_logs = list(_daemon_logs)
-    # File logs are older, mem logs are newer (CLI output)
     combined = file_logs + mem_logs
     return combined[-n:]
 
@@ -280,14 +302,16 @@ def get_logs(n=100):
 #  Public API  —  Claim Flow
 # ═══════════════════════════════════════════════════════════════════════
 
+_CLAIM_CODE = None
+
+
 def run_cli(timeout=120):
     """Generate a playit.gg claim code and URL.
 
-    Modern claim flow (no persistent process needed):
-      1. `playit claim generate`  → random claim code
+    Two-step flow:
+      1. `playit claim generate` → random claim code
       2. `playit claim url <code>` → URL for the user to visit
-      3. Returns immediately with the URL.
-      4. User calls complete_claim(<code>) after visiting the URL.
+      3. Returns immediately.  User visits URL, then calls complete_claim().
 
     Returns (ok, raw_output, lines).
     """
@@ -295,8 +319,6 @@ def run_cli(timeout=120):
     if not _PLAYIT:
         return False, "playit.exe not found", []
 
-    # Step 1: Generate claim code
-    _stop_claim_proc()
     ok, out, err = _call_playit(["claim", "generate"], timeout=15)
     if not ok or not out:
         msg = "; ".join(err[-3:]) if err else ("; ".join(out[-3:]) if out else "No claim code")
@@ -304,7 +326,6 @@ def run_cli(timeout=120):
     code = out[0].strip()
     _CLAIM_CODE = code
 
-    # Step 2: Get the claim URL
     ok2, out2, err2 = _call_playit(["claim", "url", code], timeout=15)
     url = out2[0].strip() if ok2 and out2 else f"https://playit.gg/claim/{code}"
 
@@ -317,43 +338,44 @@ def run_cli(timeout=120):
 
 
 def complete_claim(code):
-    """Exchange a claim code and provision the secret to the daemon.
-
-    Call this AFTER the user has visited the claim URL in their browser.
+    """Exchange claim code and provision the secret.
 
     Steps:
-      1. `playit claim exchange <code>` — exchange the code for a secret
-      2. `playit setup` — provision the secret to the daemon
-      3. Restart the daemon so it picks up the new secret
+      1. `playit claim exchange <code>` — exchange claim for secret
+      2. Kill tray app so it doesn't interfere
+      3. `playit setup` — provision the secret
+      4. Start the service with the new secret
     """
     if not _PLAYIT:
         return False, "playit.exe not found"
 
-    # Step 1: Exchange
     ok, out, err = _call_playit(["claim", "exchange", code], timeout=30)
     if not ok:
         msg = "; ".join(err[-3:]) if err else ("; ".join(out[-3:]) if out else "Exchange failed")
         return False, msg
-    _append_logs([f"[playit] Claim code {code} exchanged successfully"])
+    _append_logs([f"[playit] Claim code {code} exchanged"])
 
-    # Step 2: Provision secret
+    # Kill the tray app so setup doesn't conflict
+    _kill_tray()
+    time.sleep(1)
+
     ok2, out2, err2 = _call_playit(["setup"], timeout=30)
     if not ok2:
         msg = "; ".join(err2[-3:]) if err2 else "Setup failed"
         return False, f"Claimed but setup failed: {msg}"
     _append_logs(["[playit] Secret provisioned to daemon"])
 
-    # Step 3: Restart daemon
+    # Start the daemon
     stop_daemon()
     time.sleep(2)
     start_daemon()
 
-    _append_logs(["[playit] Claim complete — daemon restarted"])
+    _append_logs(["[playit] Claim complete"])
     return True, "Agent claimed and configured successfully"
 
 
 def parse_claim_url(lines):
-    """Extract a playit.gg claim URL from log/CLI lines."""
+    """Extract a playit.gg claim URL from text lines."""
     for line in lines:
         m = re.search(r'(https?://playit\.gg/(?:claim/)?[A-Za-z0-9_-]+)', line)
         if m:
@@ -364,11 +386,10 @@ def parse_claim_url(lines):
 
 
 def parse_tunnel_urls(lines):
-    """Extract tunnel addresses (*.playit.gg) from log lines.
+    """Extract tunnel addresses (*.playit.gg) from text lines.
 
     Modern playit.gg configures tunnels via the web dashboard,
-    so tunnel addresses rarely appear in CLI output.  This
-    function still scans for them as a best-effort fallback.
+    so addresses rarely appear in CLI output. This is a best-effort scan.
     """
     _EXCLUDE = {"api.playit.gg", "auth.playit.gg", "playit.gg"}
     tunnels = []
@@ -378,7 +399,7 @@ def parse_tunnel_urls(lines):
             addr = m.group(1).lower()
             host = addr.split(":")[0]
             if addr not in tunnels and host not in _EXCLUDE and 'claim' not in addr:
-                tunnels.append(m.group(1))  # keep original casing
+                tunnels.append(m.group(1))
     return tunnels
 
 
@@ -401,19 +422,22 @@ def check_tunnel_status():
 
 
 def get_tunnel_info():
-    """Return full tunnel info including logs, claim URL, and tunnel addresses."""
     logs = get_logs(100)
     url, code = parse_claim_url(logs)
     tunnels = parse_tunnel_urls(logs)
     claimed = is_claimed()
     daemon_on = _is_daemon_running()
+    service_on = _is_service_running()
+    tray_on = _is_tray_running()
 
-    # Try to get more details from 'playit status'
-    if daemon_on:
-        ok, out, _ = _call_playit(["status"])
-        status_lines = out if ok else []
-    else:
-        status_lines = []
+    # If the daemon has tunnels, note the count from logs
+    tunnel_count = _tunnel_count_from_logs(logs)
+
+    _append_logs([
+        f"[status] daemon={'service' if service_on else 'tray' if tray_on else 'off'} "
+        f"claimed={'yes' if claimed else 'no'} "
+        f"tunnels={tunnel_count}"
+    ])
 
     return {
         "installed": is_installed(),
@@ -424,4 +448,5 @@ def get_tunnel_info():
         "claim_url": url,
         "claim_code": code,
         "tunnels": tunnels,
+        "tunnel_count": tunnel_count,
     }
