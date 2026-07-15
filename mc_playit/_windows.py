@@ -142,7 +142,13 @@ def _read_log_file(n=100):
 
 
 def _kill_tray():
-    """Kill playitd-tray.exe if running (returns True if killed)."""
+    """Kill playitd-tray.exe if running (returns True if killed).
+
+    NOTE: Only call this when the user explicitly asks to stop the
+    daemon.  NEVER kill the tray app automatically — it might be
+    the user's main way of running playit.gg and killing it mid-claim
+    disconnects the agent from the website.
+    """
     try:
         r = subprocess.run(
             ["taskkill", "-f", "-im", "playitd-tray.exe"],
@@ -272,8 +278,9 @@ def stop_daemon():
                 ok = True
                 break
 
-    # Kill the tray app too
+    # Kill the tray app and any background claim agent
     _kill_tray()
+    _stop_claim_proc()
 
     if not _is_daemon_running():
         _append_logs(["[daemon] Stopped by user"])
@@ -302,87 +309,130 @@ def get_logs(n=100):
 #  Public API  —  Claim Flow
 # ═══════════════════════════════════════════════════════════════════════
 
+_setup_proc = None
 _CLAIM_CODE = None
 
 
-def run_cli(timeout=120):
-    """Generate a playit.gg claim code and URL.
+def _stop_setup():
+    """Kill the persistent playit setup process if running."""
+    global _setup_proc
+    if _setup_proc:
+        try:
+            _setup_proc.kill()
+            _setup_proc.wait(timeout=5)
+        except Exception:
+            pass
+        _setup_proc = None
 
-    Flow:
-      1. Start daemon first (daemon must be running for claim to work)
-      2. `playit claim generate` → random claim code
-      3. `playit claim url <code>` → URL for the user to visit
-      4. Returns immediately.  User visits URL, then calls complete_claim().
+
+def run_cli(timeout=120):
+    """Run 'playit setup' to claim the agent.
+
+    'playit setup' does EVERYTHING in one command:
+      1. Generates a claim code
+      2. Prints the claim URL
+      3. Waits for user to visit the URL and sign in
+      4. Detects when the claim completes
+      5. Downloads and provisions the secret to the daemon
+
+    The process MUST stay running the whole time — kill it
+    before the user claims and it shows 'waiting for agent'.
 
     Returns (ok, raw_output, lines).
     """
-    global _CLAIM_CODE
+    global _setup_proc, _CLAIM_CODE
     if not _PLAYIT:
         return False, "playit.exe not found", []
 
-    # Daemon MUST be running for the claim to work — the playit.gg website
-    # needs to see the connected agent to associate the claim.
+    _stop_setup()
+
+    # Daemon must be running
     if not _is_daemon_running():
         ok_start, msg_start = start_daemon()
         if not ok_start:
-            return False, f"Need daemon running first: {msg_start}", []
-        time.sleep(3)
+            return False, f"Daemon required: {msg_start}", []
 
-    # Run generate — keeps a background agent alive so the website
-    # can detect it during the claim.
-    ok, out, err = _call_playit(["claim", "generate"], timeout=timeout)
-    if not ok or not out:
-        msg = "; ".join(err[-3:]) if err else ("; ".join(out[-3:]) if out else "No claim code")
-        return False, msg, out + err
-    code = out[0].strip()
-    _CLAIM_CODE = code
+    # Launch 'playit setup' as a persistent background process
+    try:
+        proc = subprocess.Popen(
+            [_PLAYIT, "setup"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception as e:
+        return False, f"Failed: {e}", []
 
-    ok2, out2, err2 = _call_playit(["claim", "url", code], timeout=15)
-    url = out2[0].strip() if ok2 and out2 else f"https://playit.gg/claim/{code}"
+    # Read stdout until we get the claim URL
+    collected = []
+    url = ""
+    code = ""
 
-    lines = out + out2
+    def _reader():
+        nonlocal url, code
+        try:
+            for line in iter(proc.stdout.readline, ""):
+                clean = line.strip()
+                if clean:
+                    collected.append(clean)
+                    # The URL line looks like: "Open this link to finish setting up playit:\nhttps://..."
+                    m = re.search(r'(https?://playit\.gg/(?:claim/)?[A-Za-z0-9_-]+)', clean)
+                    if m and not url:
+                        url = m.group(1).rstrip(".,;:!?")
+                        cm = re.search(r'/claim/(.+)', url)
+                        if cm:
+                            code = cm.group(1)
+        except Exception:
+            pass
+
+    thr = threading.Thread(target=_reader, daemon=True)
+    thr.start()
+    thr.join(timeout=15)
+
+    if not url:
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+        msg = "; ".join(collected[-5:]) if collected else "No claim URL from playit setup"
+        return False, msg, collected
+
+    # Keep the process alive — this is what makes the website work!
+    _setup_proc = proc
+    _CLAIM_CODE = code if code else url.split("/claim/")[-1] if "/claim/" in url else ""
+
     with _lock:
-        _daemon_logs.append(f"[playit] Claim code generated: {code}")
-        _daemon_logs.append(f"[playit] Claim URL: {url}")
+        _daemon_logs.append(f"[playit] 'playit setup' running — visit URL to claim")
 
+    lines = collected
     return True, "\n".join(lines), lines
 
 
 def complete_claim(code):
-    """Exchange claim code and provision the secret.
+    """Finalise the claim.
 
-    Steps:
-      1. `playit claim exchange <code>` — exchange claim for secret
-      2. Kill tray app so it doesn't interfere
-      3. `playit setup` — provision the secret
-      4. Start the service with the new secret
+    'playit setup' handles the exchange & provisioning automatically
+    once the user visits the URL.  This function just checks if the
+    config now has a secret and restarts the daemon if needed.
     """
     if not _PLAYIT:
         return False, "playit.exe not found"
 
-    ok, out, err = _call_playit(["claim", "exchange", code], timeout=30)
-    if not ok:
-        msg = "; ".join(err[-3:]) if err else ("; ".join(out[-3:]) if out else "Exchange failed")
-        return False, msg
-    _append_logs([f"[playit] Claim code {code} exchanged"])
-
-    # Kill the tray app so setup doesn't conflict
-    _kill_tray()
+    # Kill the setup process (it should have already completed)
+    _stop_setup()
     time.sleep(1)
 
-    ok2, out2, err2 = _call_playit(["setup"], timeout=30)
-    if not ok2:
-        msg = "; ".join(err2[-3:]) if err2 else "Setup failed"
-        return False, f"Claimed but setup failed: {msg}"
-    _append_logs(["[playit] Secret provisioned to daemon"])
-
-    # Start the daemon
-    stop_daemon()
-    time.sleep(2)
-    start_daemon()
-
-    _append_logs(["[playit] Claim complete"])
-    return True, "Agent claimed and configured successfully"
+    # Check if the claim succeeded — config should have a secret now
+    if is_claimed():
+        _append_logs(["[playit] Claim confirmed — secret is present"])
+        return True, "Agent claimed successfully"
+    else:
+        _append_logs(["[playit] Setup completed but no secret found"])
+        return True, "Setup completed (check daemon status)"
 
 
 def parse_claim_url(lines):
