@@ -11,8 +11,6 @@ The registry persists to ~/mc-servers.json and scans ~/mc-servers/ for dirs.
 import json
 import os
 import queue
-import socket
-import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -54,12 +52,7 @@ class ServerInstance:
         return self._lock
 
     def is_running(self):
-        if self.proc is not None and self.proc.poll() is None:
-            return True
-        # Fallback: orphaned process from EXE upgrade — port still occupied
-        if self.proc is None and _is_port_open(self.port):
-            return True
-        return False
+        return self.proc is not None and self.proc.poll() is None
 
     def to_dict(self):
         return {
@@ -266,41 +259,6 @@ def _next_available_port():
     while port in used:
         port += 1
     return port
-
-
-def _is_port_open(port):
-    """Check if a TCP port is open (server might be orphaned)."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1)
-        result = s.connect_ex(("127.0.0.1", port))
-        s.close()
-        return result == 0
-    except Exception:
-        return False
-
-
-def _kill_orphan_on_port(port):
-    """Kill any process listening on the given port (Windows)."""
-    try:
-        r = subprocess.run(
-            f'netstat -ano | findstr ":{port}"',
-            capture_output=True, text=True, shell=True, timeout=5,
-        )
-        for line in r.stdout.split("\n"):
-            if "LISTENING" in line and f":{port}" in line:
-                parts = line.strip().split()
-                if parts:
-                    pid = parts[-1]
-                    subprocess.run(
-                        ["taskkill", "-f", "-pid", pid],
-                        capture_output=True, timeout=5,
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                    )
-                    return True
-    except Exception:
-        return False
-    return False
 
 
 def _save_registry():

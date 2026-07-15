@@ -10,7 +10,6 @@ import time
 from datetime import datetime, timezone
 
 import mc_state
-import mc_instances as mci
 
 
 def _reader_thread(inst):
@@ -251,11 +250,6 @@ def _try_auto_install_java(needed_ver, inst):
 def start_server(inst):
     if inst.is_running():
         return False, "Server already running."
-
-    # Check for orphaned Java process on this port (survived an EXE upgrade)
-    if not inst.is_running() and mci._is_port_open(inst.port):
-        mci._kill_orphan_on_port(inst.port)
-        time.sleep(1)
 
     # Check if Java binary actually exists
     java_bin = _get_java_bin(inst)
