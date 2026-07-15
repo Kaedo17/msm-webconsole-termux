@@ -2605,7 +2605,7 @@ def main():
 
     try:
         from waitress import serve
-        serve(app, host=host, port=port, threads=8)
+        serve(app, host=host, port=port, threads=8, send_bytes=1)
     except ImportError:
         app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 

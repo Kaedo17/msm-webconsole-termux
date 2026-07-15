@@ -84,7 +84,8 @@ def start_flask(data_dir, port):
     from webconsole import app
     try:
         from waitress import serve
-        serve(app, host="127.0.0.1", port=port, threads=8)
+        # send_bytes=1 prevents SSE buffering (console logs stream in real-time)
+        serve(app, host="127.0.0.1", port=port, threads=8, send_bytes=1)
     except ImportError:
         app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
 
