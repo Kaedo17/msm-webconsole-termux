@@ -52,7 +52,21 @@ class ServerInstance:
         return self._lock
 
     def is_running(self):
-        return self.proc is not None and self.proc.poll() is None
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        # Fallback: orphaned process from EXE upgrade — check port
+        if self.proc is None:
+            try:
+                import socket as _s
+                s = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+                s.settimeout(0.5)
+                r = s.connect_ex(("127.0.0.1", self.port))
+                s.close()
+                if r == 0:
+                    return True
+            except Exception:
+                pass
+        return False
 
     def to_dict(self):
         return {
